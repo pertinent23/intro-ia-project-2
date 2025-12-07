@@ -170,3 +170,5 @@ pip-wheel-metadata/
 # All .md files except README.md
 *.md
 !README.md
+
+*.pth
