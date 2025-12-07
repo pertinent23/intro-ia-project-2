@@ -34,9 +34,14 @@ class PacmanNetwork(nn.Module):
             nn.Linear(256, 128),
             nn.LeakyReLU(),
             
-            # Couche cachée 3 -> Couche cachée 4
+            # Couche cachée 4 -> Couche cachée 5
             # On analyse en profondeur notre nouveau jeu
             nn.Linear(128, 256),
+            nn.LeakyReLU(),
+            
+            # Couche cachée 5 -> Couche cachée 6
+            # On analyse en profondeur notre nouveau jeu
+            nn.Linear(256, 256),
             nn.LeakyReLU(),
             
             # Couche cachée 4 -> Couche cachée 5
