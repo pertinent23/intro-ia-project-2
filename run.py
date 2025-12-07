@@ -15,7 +15,7 @@ SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 
-input_size = 9 
+input_size = 14 
 pacman_model = "pacman_model.pth"
 model = PacmanNetwork(input_size)
     
