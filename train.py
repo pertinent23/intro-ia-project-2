@@ -30,7 +30,7 @@ class Pipeline(nn.Module):
         # Adam est un excellent optimiseur par défaut
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
 
-    def train(self, epochs=20, batch_size=64):
+    def train(self, epochs=50, batch_size=64):
         print(f"Début de l'entraînement sur {len(self.train_dataset)} exemples...")
         
         # DataLoader permet de créer des "batchs" (paquets) de données
