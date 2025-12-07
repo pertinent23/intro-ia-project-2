@@ -3,8 +3,11 @@ import pickle
 import torch
 from torch.utils.data import Dataset
 
+from pacman_module.pacman import GameState
+from pacman_module.pacman import Directions
 
-def state_to_tensor(state):
+
+def state_to_tensor(state: GameState):
     """
     Build the input of your network.
     We encourage you to do some clever feature engineering here!
