@@ -86,7 +86,7 @@ def state_to_tensor(state: GameState):
         features.append(0)
         features.append(0)
     
-    return torch.sensor(features, dtype=torch.float32)
+    return torch.tensor(features, dtype=torch.float32)
 
 
 class PacmanDataset(Dataset):
