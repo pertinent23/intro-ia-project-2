@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import random
 import torch
@@ -13,12 +15,17 @@ SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 
-path_to_saved_model = ".pth"
+input_size = 9 
+pacman_model = "pacman_model.pth"
+model = PacmanNetwork(input_size)
+    
+# Charger les poids appris
+if os.path.exists(pacman_model):
+    model.load_state_dict(torch.load(pacman_model, map_location="cpu"))
+    print("Modèle chargé avec succès.")
+else:
+    print("Erreur : pacman_model.pth introuvable. Lancez train.py d'abord.")
 
-# Feel free to add code here depending on your implementation
-
-model = PacmanNetwork()
-model.load_state_dict(torch.load(path_to_saved_model, map_location="cpu"))
 model.eval()
 
 pacman_agent = PacmanAgent(model)
