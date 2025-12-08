@@ -174,3 +174,4 @@ pip-wheel-metadata/
 *.pth
 
 *.csv
+mnist.ipynb
