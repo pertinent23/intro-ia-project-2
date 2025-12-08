@@ -172,3 +172,5 @@ pip-wheel-metadata/
 !README.md
 
 *.pth
+
+*.csv

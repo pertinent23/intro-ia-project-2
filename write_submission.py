@@ -4,6 +4,7 @@ import pandas as pd
 
 from data import state_to_tensor
 from architecture import PacmanNetwork
+from pacmanagent import PacmanAgent
 
 
 class SubmissionWriter:
@@ -20,7 +21,7 @@ class SubmissionWriter:
         with open(test_set_path, "rb") as f:
             self.test_set = pickle.load(f)
 
-        self.model = PacmanNetwork()
+        self.model = PacmanNetwork(14)
         self.model.load_state_dict(torch.load(model_path, map_location="cpu"))
         self.model.eval()
 
@@ -33,9 +34,10 @@ class SubmissionWriter:
         as the test set provided.
         """
         actions = []
+        agent = PacmanAgent(self.model)
         for state in self.test_set:
-            x = state_to_tensor(state).unsqueeze(0)
-            # Your code here
+            best_action = agent.get_action(state)
+            actions.append(best_action)
         return actions
 
     def write_csv(self, actions, file_name="submission"):
@@ -58,7 +60,7 @@ class SubmissionWriter:
 
 if __name__ == "__main__":
     writer = SubmissionWriter(
-        test_set_path="pacman_test.pkl",
+        test_set_path="datasets/pacman_test.pkl",
         model_path="pacman_model.pth"  # change if needed
     )
     predictions = writer.predict_on_testset()
