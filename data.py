@@ -149,18 +149,25 @@ class PacmanDataset(Dataset):
 
         for s, a in data:
             x = state_to_tensor(s)
-            # Accepter que l'action soit une string ou déjà une valeur
             if isinstance(a, str):
                 label = ACTION_TO_IDX.get(a, ACTION_TO_IDX[Directions.STOP])
             else:
-                # cas improbable: a est déjà un membre de Directions (qui est une string aussi)
                 label = ACTION_TO_IDX.get(a, ACTION_TO_IDX[Directions.STOP])
 
             self.inputs.append(x)
             self.actions.append(torch.tensor(label, dtype=torch.long))
 
+        # Empiler les tenseurs pour un accès constant en temps
+        if len(self.inputs) > 0:
+            self.inputs = torch.stack(self.inputs)
+            self.actions = torch.stack(self.actions)
+        else:
+            # cas vide — garder des tensors vides
+            self.inputs = torch.empty((0,))
+            self.actions = torch.empty((0,), dtype=torch.long)
+
     def __len__(self) -> int:
-        return len(self.inputs)
+        return int(self.inputs.shape[0])
 
     def __getitem__(self, idx: int):
         return self.inputs[idx], self.actions[idx]
