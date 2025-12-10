@@ -23,11 +23,13 @@ class PacmanNetwork(nn.Module):
             # Fonction d'activation Leaky ReLU
             # Elle introduit de la non-linéarité pour apprendre des fonctions complexes
             nn.LeakyReLU(),
+            nn.Dropout(p=0.3),
             
             # Couche cachée 1 -> Couche cachée 2
             # On réduit la dimensionnalité pour forcer le réseau à synthétiser l'info
             nn.Linear(512, 256),
             nn.LeakyReLU(),
+            nn.Dropout(p=0.2),
             
             # Couche cachée 2 -> Couche cachée 3
             # On réduit la dimensionnalité pour forcer le réseau à synthétiser l'info
