@@ -1,10 +1,12 @@
-from pacman_module.game import Directions
-
 import pickle
 import torch
 
 from torch.utils.data import Dataset
 from collections import deque
+
+from pacman_module.game import Directions
+from pacman_module.pacman import GameState
+
 
 # Mapping des actions textuelles vers des index numériques pour le réseau
 ACTION_TO_IDX = {
@@ -63,16 +65,19 @@ def get_maze_distance(start, target, walls):
     return 100 
 
 
-def state_to_tensor(state):
+def state_to_tensor(state: GameState):
     """
     Transforme un objet GameState complexe en un vecteur de nombres (Tensor)
     compréhensible par le réseau de neurones.
     
-    Stratégie Hybride :
-    - Action-Centric : Évaluation de chaque direction pour la nourriture/capsules.
-    - Globale : État des fantômes, vision locale des murs, actions légales et score.
+    Stratégie "Action-Centric" :
+    Pour chaque direction (N, S, E, O), on regarde :
+    1. Y a-t-il un mur ?
+    2. À quelle distance est la nourriture si je vais par là ?
+    3. À quelle distance est le danger si je vais par là ?
     """
     pacman_pos = state.getPacmanPosition()
+    # On s'assure d'avoir des entiers pour les index de grille
     pacman_pos = (int(pacman_pos[0]), int(pacman_pos[1]))
     
     walls = state.getWalls()
@@ -80,82 +85,138 @@ def state_to_tensor(state):
     capsules = state.getCapsules()
     ghost_states = state.getGhostStates()
     
+    grid_width = walls.width
+    grid_height = walls.height
+    
     features = []
     
+    # Constante pour normaliser les distances (aide le réseau à converger)
     MAX_DIST_NORM = 50.0 
-
-    # --- FEATURES "ACTION-CENTRIC" (Évaluation de chaque direction) ---
-    scan_directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    
+    # La distance au delà de laquelle le fantome n'est plus un danger
+    MAX_DIST_GHOST_NORM = 15.0
+        
+    # Ordre fixe des directions à analyser : Nord, Sud, Est, Ouest
+    # Cela correspond souvent aux index 0, 1, 2, 3 de sortie du réseau
+    scan_directions = []
+    
+    for dy in range(-1, 2):
+        for dx in range(-1, 2):
+            if dx == 0 and dy == 0:
+                continue # On ignore la position de Pacman
+            scan_directions.append((dx, dy))
     
     for dx, dy in scan_directions:
+        # La case que l'on vise
         next_x = pacman_pos[0] + dx
         next_y = pacman_pos[1] + dy
-        next_pos = (next_x, next_y)
         
-        # Feature A : Mur
+        features.append(dx) # is_wall
+        features.append(dy) # is_wall
+        
+        # --- VÉRIFICATION DES LIMITES ---
+        if not (0 <= next_x < grid_width and 0 <= next_y < grid_height):
+            # La case est hors de la carte, on la traite comme un mur avec des valeurs par défaut
+            features.append(1.0) # is_wall
+            features.append(1.0) # food_dist (très loin)
+            features.append(0.0) # danger (fantôme)
+            features.append(0.0) # capsule
+            features.append(0.0) # capsule
+            continue
+        
+        # --- FEATURE A : MUR (1 valeur) ---
+        # Si c'est un mur, 1.0, sinon 0.0
         is_wall = walls[next_x][next_y]
         features.append(1.0 if is_wall else 0.0)
         
+        # Si c'est un mur, inutile de calculer des chemins complexes, on met des valeurs par défaut
         if is_wall:
             features.append(1.0) # Nourriture considérée "très loin"
-            features.append(1.0) # Capsule considérée "très loin"
+            features.append(0.0) # Danger (fantôme) considéré "nul"
+            features.append(0.0) # Le fantôme ne peut pas être atteind dans son état éffrayé
+            features.append(0.0) # Capsule considérée "nulle"
             continue
             
-        # Feature B : Nourriture
+        # --- FEATURE B : NOURRITURE (1 valeur) ---
         food_list = food.asList()
         if len(food_list) > 0:
-            closest_food = min(food_list, key=lambda f: abs(f[0]-next_x) + abs(f[1]-next_y))
-            dist_food = get_maze_distance(next_pos, closest_food, walls)
+            # Optimisation: On trouve d'abord le candidat le plus proche en "vol d'oiseau" (Manhattan)
+            # pour éviter de lancer 50 BFS gourmands en calculs.
+            closest_food_manhattan = min(food_list, key=lambda f: abs(f[0]-next_x) + abs(f[1]-next_y))
+            
+            # On calcule la vraie distance labyrinthe vers ce candidat
+            dist_food = get_maze_distance((next_x, next_y), closest_food_manhattan, walls)
+            
+            # Normalisation : 0.0 (sur place) à 1.0 (très loin)
             features.append(min(dist_food, MAX_DIST_NORM) / MAX_DIST_NORM)
         else:
+            # Plus de nourriture sur le terrain (victoire proche)
             features.append(0.0)
 
-        # Feature C : Capsules
-        if len(capsules) > 0:
-            closest_capsule = min(capsules, key=lambda c: abs(c[0]-next_x) + abs(c[1]-next_y))
-            dist_capsule = get_maze_distance(next_pos, closest_capsule, walls)
-            features.append(min(dist_capsule, MAX_DIST_NORM) / MAX_DIST_NORM)
-        else:
-            features.append(0.0)
-
-    # --- FEATURES GLOBALES : FANTÔMES ---
-    sorted_ghosts = sorted(ghost_states, key=lambda g: get_maze_distance(pacman_pos, (int(g.getPosition()[0]), int(g.getPosition()[1])), walls))
-
-    for i in range(4):
-        if i < len(sorted_ghosts):
-            ghost = sorted_ghosts[i]
-            ghost_pos = (int(ghost.getPosition()[0]), int(ghost.getPosition()[1]))
-            dist_ghost = get_maze_distance(pacman_pos, ghost_pos, walls)
-            features.append(min(dist_ghost, MAX_DIST_NORM) / MAX_DIST_NORM)
+        # --- FEATURE C : FANTÔMES (1 valeur) ---
+        if len(ghost_states) > 0:
+            # Trouver le fantôme le plus proche
+            closest_ghost = min(ghost_states, key=lambda g: abs(g.getPosition()[0]-next_x) + abs(g.getPosition()[1]-next_y))
+            ghost_pos_int = (int(closest_ghost.getPosition()[0]), int(closest_ghost.getPosition()[1]))
             
-            proximity_score = max(0, 1.0 - (dist_ghost / 15.0))
-            if ghost.scaredTimer > 5:
+            dist_ghost = get_maze_distance((next_x, next_y), ghost_pos_int, walls)
+            
+            # On normalise la distance (ex: sur une base de 15 pas)
+            # Si dist=0 (sur nous), norm=1. Si dist=15, norm=0.
+            proximity_score = max(0, 1.0 - (dist_ghost / MAX_DIST_GHOST_NORM))
+            
+            if closest_ghost.scaredTimer > 0:
+                # CAS 1 : Fantôme effrayé (Mangeable)
+                # On veut être proche -> score négatif ou feature dédiée. 
+                # Ici on inverse : une grande proximité devient une "invitation" (valeur négative)
                 features.append(-proximity_score)
             else:
+                # CAS 2 : Fantôme normal (Danger)
+                # Une grande proximité est un grand danger (valeur positive forte)
                 features.append(proximity_score)
+                
+            features.append(1.0 if (dist_ghost < closest_ghost.scaredTimer and closest_ghost.scaredTimer > 0) else 0.0)
+                
         else:
-            features.append(1.0) 
+            features.append(0.0)
+            features.append(0.0)
+            
+        
+        # --- FEATURE D : Capsules (1 valeur) ---
+        if len(capsules) > 0:
+            # Optimisation: On trouve d'abord le candidat le plus proche en "vol d'oiseau" (Manhattan)
+            closest_capsule_manhattan = min(capsules, key=lambda c: abs(c[0]-next_x) + abs(c[1]-next_y))
+            
+            # On calcule la vraie distance labyrinthe vers ce candidat
+            dist_capsule = get_maze_distance((next_x, next_y), closest_capsule_manhattan, walls)
+            
+            # Normalisation : 0.0 (sur place) à 1.0 (très loin)
+            features.append(min(dist_capsule, MAX_DIST_NORM) / MAX_DIST_NORM)
+        else:
+            # Pas de capsule sur le terrain
             features.append(0.0)
 
-    # --- FEATURE GLOBALE : GRILLE DE MURS 5x5 ---
-    half = 2
-    for dy_grid in range(-half, half + 1):
-        for dx_grid in range(-half, half + 1):
-            x = int(pacman_pos[0] + dx_grid)
-            y = int(pacman_pos[1] + dy_grid)
-            if x < 0 or y < 0 or x >= walls.width or y >= walls.height:
-                features.append(1.0) # Hors de la carte = considéré comme un mur
-            else:
-                features.append(1.0 if walls[x][y] else 0.0)
+    # --- FEATURES GLOBALES (Optionnel mais utile) ---
     
-    # --- FEATURE GLOBALE : MASQUE D'ACTIONS LÉGALES ---
-    legal = state.getLegalPacmanActions()
-    legal_mask = [0.0] * len(ACTION_TO_IDX)
-    for a in legal:
-        idx = ACTION_TO_IDX.get(a)
-        if idx is not None:
-            legal_mask[idx] = 1.0
-    features += legal_mask
+    # Timer d'effroi global (normalisé) : Indique si c'est le moment d'attaquer
+    total_scared_timer = sum([g.scaredTimer for g in ghost_states])
+    features.append(min(total_scared_timer, 40) / 40.0)
+    
+    # --- FEATURE F : FANTÔMES (40 valeur) ---
+    sorted_ghosts = sorted(ghost_states, key=lambda g: get_maze_distance(pacman_pos, (int(g.getPosition()[0]), int(g.getPosition()[1])), walls))
+    for ghost_index in range(4):
+        if ghost_index < len(sorted_ghosts):
+            gstate = sorted_ghosts[ghost_index]
+            dist_ghost_pacman = get_maze_distance(pacman_pos, gstate.getPosition(), walls)
+            dist_ghost = max(0, 1.0 - (dist_ghost_pacman / MAX_DIST_GHOST_NORM))
+            features.append(dist_ghost) 
+            if gstate.scaredTimer > dist_ghost_pacman:
+                features.append(gstate.scaredTimer - dist_ghost_pacman)
+            else:
+                features.append(0.0)
+        else:
+            features.append(0.0)
+            features.append(0.0)
 
     # Conversion finale en Tensor Float32
     return torch.tensor(features, dtype=torch.float32)

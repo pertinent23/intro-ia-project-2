@@ -30,7 +30,10 @@ class Pipeline(nn.Module):
         # Adam est un excellent optimiseur par défaut
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
 
-    def train(self, epochs=50, batch_size=64):
+        # Scheduler pour ajuster le learning rate en fonction de la perte
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=2, verbose=True)
+
+    def train(self, epochs=120, batch_size=64):
         print(f"Début de l'entraînement sur {len(self.train_dataset)} exemples...")
         
         # DataLoader permet de créer des "batchs" (paquets) de données
@@ -73,6 +76,9 @@ class Pipeline(nn.Module):
             val_acc = self.evaluate(val_loader)
 
             print(f"Epoch [{epoch+1}/{epochs}] | Loss: {avg_loss:.4f} | Train Acc: {train_acc:.2f}% | Val Acc: {val_acc:.2f}%")
+
+            # Mise à jour du scheduler avec la perte moyenne de l'époque
+            self.scheduler.step(avg_loss)
 
         # Sauvegarde du modèle final
         torch.save(self.model.state_dict(), "pacman_model.pth")
