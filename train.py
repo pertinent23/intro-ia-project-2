@@ -14,8 +14,8 @@ class Pipeline(nn.Module):
         # Chargement du Dataset
         full_dataset = PacmanDataset(path)
         
-        # Séparation Train / Validation (80% / 20%)
-        train_size = int(0.8 * len(full_dataset))
+        # Séparation Train / Validation (65% / 35%)
+        train_size = int(0.65 * len(full_dataset))
         val_size = len(full_dataset) - train_size
         self.train_dataset, self.val_dataset = random_split(full_dataset, [train_size, val_size])
 
