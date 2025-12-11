@@ -23,7 +23,7 @@ class PacmanNetwork(nn.Module):
             # Fonction d'activation Leaky ReLU
             # Elle introduit de la non-linéarité pour apprendre des fonctions complexes
             nn.LeakyReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.4),
             
             # Couche cachée 1 -> Couche cachée 2
             # On réduit la dimensionnalité pour forcer le réseau à synthétiser l'info
@@ -35,10 +35,23 @@ class PacmanNetwork(nn.Module):
             # On réduit la dimensionnalité pour forcer le réseau à synthétiser l'info
             nn.Linear(128, 64),
             nn.LeakyReLU(),
+            nn.Dropout(0.1),
+            
+            # Couche cachée 3 -> Couche cachée 4
+            # On réduit la dimensionnalité pour forcer le réseau à synthétiser l'info
+            nn.Linear(64, 32),
+            nn.LeakyReLU(),
+            nn.Dropout(0.05),
+            
+            # Couche cachée 4 -> Couche cachée 5
+            # On réduit la dimensionnalité pour forcer le réseau à synthétiser l'info
+            nn.Linear(32, 16),
+            nn.LeakyReLU(),
+            
             
             # Couche cachée 5 -> Sortie
             # On projette vers les 5 actions possibles
-            nn.Linear(64, num_actions)
+            nn.Linear(16, num_actions)
         )
 
     def forward(self, x):

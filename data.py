@@ -47,21 +47,6 @@ def get_maze_distance(start, target, walls):
                     queue.append(((nx, ny), dist + 1))
     return 999
 
-def is_trap(start_pos, current_direction, walls, ghosts_pos):
-    """
-    Détecte les culs-de-sac mortels (Pièges).
-    """
-    dx, dy = Actions.directionToVector(current_direction)
-    curr_x, curr_y = int(start_pos[0] + dx), int(start_pos[1] + dy)
-    
-    if walls[curr_x][curr_y]: return True
-
-    # Vérification simplifiée de proximité immédiate d'un fantôme
-    for g_pos in ghosts_pos:
-        if abs(g_pos[0] - curr_x) + abs(g_pos[1] - curr_y) <= 1:
-            return True 
-    return False
-
 def calculate_score(pos, targets, walls):
     """
     Trouve la cible la plus proche et retourne 1 / (Distance + 1).
@@ -81,6 +66,21 @@ def calculate_score(pos, targets, walls):
         return 0.0
         
     return 1.0 / (dist + 1.0)
+
+def is_trap(start_pos, current_direction, walls, ghosts_pos):
+    """
+    Détecte les culs-de-sac mortels (Pièges).
+    """
+    dx, dy = Actions.directionToVector(current_direction)
+    curr_x, curr_y = int(start_pos[0] + dx), int(start_pos[1] + dy)
+    
+    if walls[curr_x][curr_y]: return True
+
+    # Vérification simplifiée de proximité immédiate d'un fantôme
+    for g_pos in ghosts_pos:
+        if abs(g_pos[0] - curr_x) + abs(g_pos[1] - curr_y) <= 1:
+            return True 
+    return False
 
 def state_to_tensor(state: GameState):
     """

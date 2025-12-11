@@ -46,7 +46,7 @@ class Pipeline(nn.Module):
         # Scheduler pour ajuster le learning rate en fonction de la perte
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=2, verbose=True)
 
-    def train(self, epochs=100, batch_size=64, patience=20):
+    def train(self, epochs=90, batch_size=64, patience=15):
         print(f"Début de l'entraînement sur {len(self.train_dataset)} exemples...")
         
         # DataLoader permet de créer des "batchs" (paquets) de données
