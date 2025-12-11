@@ -11,11 +11,16 @@ from architecture import PacmanNetwork
 from pacmanagent import PacmanAgent
 
 
-SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
+def set_seed(seed=42):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
 
-input_size = 65
+set_seed(50)
+
+input_size = 25
 pacman_model = "pacman_model.pth"
 model = PacmanNetwork(input_size)
     

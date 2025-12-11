@@ -1,14 +1,17 @@
-import pickle
-import torch
-
-from torch.utils.data import Dataset
+"""
+Module de gestion des données pour le projet Pacman.
+Optimisé pour l'apprentissage 'Survival & Combat' avec features séparées.
+"""
 from collections import deque
 
-from pacman_module.game import Directions
+import pickle
+import torch
+from torch.utils.data import Dataset
+
+from pacman_module.game import Directions, Actions
 from pacman_module.pacman import GameState
 
-
-# Mapping des actions textuelles vers des index numériques pour le réseau
+# --- CONFIGURATION ---
 ACTION_TO_IDX = {
     Directions.NORTH: 0,
     Directions.SOUTH: 1,
@@ -17,243 +20,177 @@ ACTION_TO_IDX = {
     Directions.STOP: 4
 }
 
-# Mapping inverse utile pour le débogage ou l'agent
 INDEX_TO_ACTION_MAP = {v: k for k, v in ACTION_TO_IDX.items()}
-
-
-# --- FONCTIONS UTILITAIRES (Feature Engineering) ---
 
 def get_maze_distance(start, target, walls):
     """
-    Calcule la distance réelle (nombre de pas) entre deux points
-    en contournant les murs, utilisant un algorithme BFS (Breadth-First Search).
-    
-    Arguments:
-        start (tuple): (x, y) point de départ
-        target (tuple): (x, y) point d'arrivée
-        walls (Grid): La grille des murs du jeu
-        
-    Returns:
-        int: La distance en nombre de pas. Retourne une valeur arbitraire (ex: 100)
-        si la cible est inaccessible.
+    Calcule la distance réelle (BFS). Retourne 999 si inaccessible.
     """
-    if start == target:
-        return 0
-    
-    # File d'attente pour le BFS: stocke ((x, y), distance_actuelle)
-    queue = deque([(start, 0)])
-    visited = set([start])
+    if start == target: return 0
     w, h = walls.width, walls.height
-    
-    while queue:
-        (curr_x, curr_y), dist = queue.popleft()
-        
-        if (curr_x, curr_y) == target:
-            return dist
-        
-        # Explorer les voisins (Nord, Sud, Est, Ouest)
-        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-            next_x, next_y = int(curr_x + dx), int(curr_y + dy)
-            
-            # Vérifier que l'on reste dans la carte et qu'on ne traverse pas un mur
-            if 0 <= next_x < w and 0 <= next_y < h:
-                if not walls[next_x][next_y] and (next_x, next_y) not in visited:
-                    visited.add((next_x, next_y))
-                    queue.append(((next_x, next_y), dist + 1))
-    
-    # Si on ne trouve pas de chemin (cible inatteignable)
-    return 100 
+    if not (0 <= target[0] < w and 0 <= target[1] < h) or walls[int(target[0])][int(target[1])]:
+        return 999
 
+    queue = deque([(start, 0)])
+    visited = {start}
+
+    while queue:
+        (cx, cy), dist = queue.popleft()
+        if (cx, cy) == target:
+            return dist
+
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            nx, ny = int(cx + dx), int(cy + dy)
+            if 0 <= nx < w and 0 <= ny < h:
+                if not walls[nx][ny] and (nx, ny) not in visited:
+                    visited.add((nx, ny))
+                    queue.append(((nx, ny), dist + 1))
+    return 999
+
+def calculate_score(pos, targets, walls):
+    """
+    Trouve la cible la plus proche et retourne 1 / (Distance + 1).
+    Optimisation: Utilise la distance Manhattan pour pré-sélectionner la cible
+    avant de lancer le BFS coûteux.
+    """
+    if not targets:
+        return 0.0
+    
+    # 1. Heuristique rapide : Trouver la cible la plus proche à vol d'oiseau
+    closest_target = min(targets, key=lambda t: abs(t[0]-pos[0]) + abs(t[1]-pos[1]))
+    
+    # 2. Calcul précis : BFS seulement vers cette cible
+    dist = get_maze_distance(pos, closest_target, walls)
+    
+    if dist >= 999:
+        return 0.0
+        
+    return 1.0 / (dist + 1.0)
+
+def is_trap(start_pos, current_direction, walls, ghosts_pos):
+    """
+    Détecte les culs-de-sac mortels (Pièges).
+    """
+    dx, dy = Actions.directionToVector(current_direction)
+    curr_x, curr_y = int(start_pos[0] + dx), int(start_pos[1] + dy)
+    
+    if walls[curr_x][curr_y]: return True
+
+    # Vérification simplifiée de proximité immédiate d'un fantôme
+    for g_pos in ghosts_pos:
+        if abs(g_pos[0] - curr_x) + abs(g_pos[1] - curr_y) <= 1:
+            return True 
+    return False
 
 def state_to_tensor(state: GameState):
     """
-    Transforme un objet GameState complexe en un vecteur de nombres (Tensor)
-    compréhensible par le réseau de neurones.
-    
-    Stratégie "Action-Centric" :
-    Pour chaque direction (N, S, E, O), on regarde :
-    1. Y a-t-il un mur ?
-    2. À quelle distance est la nourriture si je vais par là ?
-    3. À quelle distance est le danger si je vais par là ?
+    Extraction de Features Séparées.
+    Input Size: 25 Floats
+    Structure par direction : [Mur, Food, Capsule, ScaredGhost, Danger]
     """
     pacman_pos = state.getPacmanPosition()
-    # On s'assure d'avoir des entiers pour les index de grille
     pacman_pos = (int(pacman_pos[0]), int(pacman_pos[1]))
-    
     walls = state.getWalls()
-    food = state.getFood()
+    food = state.getFood().asList()
     capsules = state.getCapsules()
     ghost_states = state.getGhostStates()
-    
-    grid_width = walls.width
-    grid_height = walls.height
-    
+
+    scared_ghosts_pos = []
+    normal_ghosts_pos = []
+    scared_timer_val = 0.0
+
+    for g in ghost_states:
+        pos = (int(g.getPosition()[0]), int(g.getPosition()[1]))
+        if g.scaredTimer > 0:
+            scared_ghosts_pos.append(pos)
+            scared_timer_val = max(scared_timer_val, g.scaredTimer / 40.0)
+        else:
+            normal_ghosts_pos.append(pos)
+
     features = []
-    
-    # Constante pour normaliser les distances (aide le réseau à converger)
-    MAX_DIST_NORM = 50.0 
-    
-    # La distance au delà de laquelle le fantome n'est plus un danger
-    MAX_DIST_GHOST_NORM = 15.0
+    directions = [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST]
+
+    # --- PARTIE A : ANALYSE PAR DIRECTION (4 dir * 5 features = 20) ---
+    for action in directions:
+        dx, dy = Actions.directionToVector(action)
+        next_x, next_y = int(pacman_pos[0] + dx), int(pacman_pos[1] + dy)
+        next_pos = (next_x, next_y)
+
+        # 1. MUR / PIÈGE
+        is_blocked = False
+        if walls[next_x][next_y] or is_trap(pacman_pos, action, walls, normal_ghosts_pos):
+            is_blocked = True
         
-    # Ordre fixe des directions à analyser : Nord, Sud, Est, Ouest
-    # Cela correspond souvent aux index 0, 1, 2, 3 de sortie du réseau
-    scan_directions = []
-    
-    for dy in range(-1, 2):
-        for dx in range(-1, 2):
-            if dx == 0 and dy == 0:
-                continue # On ignore la position de Pacman
-            scan_directions.append((dx, dy))
-    
-    for dx, dy in scan_directions:
-        # La case que l'on vise
-        next_x = pacman_pos[0] + dx
-        next_y = pacman_pos[1] + dy
-        
-        features.append(dx) # is_wall
-        features.append(dy) # is_wall
-        
-        # --- VÉRIFICATION DES LIMITES ---
-        if not (0 <= next_x < grid_width and 0 <= next_y < grid_height):
-            # La case est hors de la carte, on la traite comme un mur avec des valeurs par défaut
-            features.append(1.0) # is_wall
-            features.append(1.0) # food_dist (très loin)
-            features.append(0.0) # danger (fantôme)
-            features.append(0.0) # capsule
-            features.append(0.0) # capsule
+        if is_blocked:
+            # Ordre: [Mur, Food, Cap, Scared, Danger]
+            # Si mur, tout est 0 sauf l'index mur
+            features.extend([1.0, 0.0, 0.0, 0.0, 0.0])
             continue
         
-        # --- FEATURE A : MUR (1 valeur) ---
-        # Si c'est un mur, 1.0, sinon 0.0
-        is_wall = walls[next_x][next_y]
-        features.append(1.0 if is_wall else 0.0)
-        
-        # Si c'est un mur, inutile de calculer des chemins complexes, on met des valeurs par défaut
-        if is_wall:
-            features.append(1.0) # Nourriture considérée "très loin"
-            features.append(0.0) # Danger (fantôme) considéré "nul"
-            features.append(0.0) # Le fantôme ne peut pas être atteind dans son état éffrayé
-            features.append(0.0) # Capsule considérée "nulle"
-            continue
-            
-        # --- FEATURE B : NOURRITURE (1 valeur) ---
-        food_list = food.asList()
-        if len(food_list) > 0:
-            # Optimisation: On trouve d'abord le candidat le plus proche en "vol d'oiseau" (Manhattan)
-            # pour éviter de lancer 50 BFS gourmands en calculs.
-            closest_food_manhattan = min(food_list, key=lambda f: abs(f[0]-next_x) + abs(f[1]-next_y))
-            
-            # On calcule la vraie distance labyrinthe vers ce candidat
-            dist_food = get_maze_distance((next_x, next_y), closest_food_manhattan, walls)
-            
-            # Normalisation : 0.0 (sur place) à 1.0 (très loin)
-            features.append(min(dist_food, MAX_DIST_NORM) / MAX_DIST_NORM)
-        else:
-            # Plus de nourriture sur le terrain (victoire proche)
-            features.append(0.0)
+        # Si voie libre : Mur = 0
+        features.append(0.0)
 
-        # --- FEATURE C : FANTÔMES (1 valeur) ---
-        if len(ghost_states) > 0:
-            # Trouver le fantôme le plus proche
-            closest_ghost = min(ghost_states, key=lambda g: abs(g.getPosition()[0]-next_x) + abs(g.getPosition()[1]-next_y))
-            ghost_pos_int = (int(closest_ghost.getPosition()[0]), int(closest_ghost.getPosition()[1]))
-            
-            dist_ghost = get_maze_distance((next_x, next_y), ghost_pos_int, walls)
-            
-            # On normalise la distance (ex: sur une base de 15 pas)
-            # Si dist=0 (sur nous), norm=1. Si dist=15, norm=0.
-            proximity_score = max(0, 1.0 - (dist_ghost / MAX_DIST_GHOST_NORM))
-            
-            if closest_ghost.scaredTimer > 0:
-                # CAS 1 : Fantôme effrayé (Mangeable)
-                # On veut être proche -> score négatif ou feature dédiée. 
-                # Ici on inverse : une grande proximité devient une "invitation" (valeur négative)
-                features.append(-proximity_score)
-            else:
-                # CAS 2 : Fantôme normal (Danger)
-                # Une grande proximité est un grand danger (valeur positive forte)
-                features.append(proximity_score)
-                
-            features.append(1.0 if (dist_ghost < closest_ghost.scaredTimer and closest_ghost.scaredTimer > 0) else 0.0)
-                
-        else:
-            features.append(0.0)
-            features.append(0.0)
-            
-        
-        # --- FEATURE D : Capsules (1 valeur) ---
-        if len(capsules) > 0:
-            # Optimisation: On trouve d'abord le candidat le plus proche en "vol d'oiseau" (Manhattan)
-            closest_capsule_manhattan = min(capsules, key=lambda c: abs(c[0]-next_x) + abs(c[1]-next_y))
-            
-            # On calcule la vraie distance labyrinthe vers ce candidat
-            dist_capsule = get_maze_distance((next_x, next_y), closest_capsule_manhattan, walls)
-            
-            # Normalisation : 0.0 (sur place) à 1.0 (très loin)
-            features.append(min(dist_capsule, MAX_DIST_NORM) / MAX_DIST_NORM)
-        else:
-            # Pas de capsule sur le terrain
-            features.append(0.0)
+        # 2. FOOD SCORE (On veut manger)
+        features.append(calculate_score(next_pos, food, walls))
 
-    # --- FEATURES GLOBALES (Optionnel mais utile) ---
+        # 3. CAPSULE SCORE (On veut des pouvoirs)
+        features.append(calculate_score(next_pos, capsules, walls))
+
+        # 4. SCARED GHOST SCORE (On veut chasser)
+        features.append(calculate_score(next_pos, scared_ghosts_pos, walls))
+
+        # 5. DANGER SCORE (On veut fuir - Fantôme Normal)
+        features.append(calculate_score(next_pos, normal_ghosts_pos, walls))
+
+
+    # --- PARTIE B : GLOBAL INFO (5 features) ---
     
-    # Timer d'effroi global (normalisé) : Indique si c'est le moment d'attaquer
-    total_scared_timer = sum([g.scaredTimer for g in ghost_states])
-    features.append(min(total_scared_timer, 40) / 40.0)
-    
-    # --- FEATURE F : FANTÔMES (40 valeur) ---
-    sorted_ghosts = sorted(ghost_states, key=lambda g: get_maze_distance(pacman_pos, (int(g.getPosition()[0]), int(g.getPosition()[1])), walls))
-    for ghost_index in range(4):
-        if ghost_index < len(sorted_ghosts):
-            gstate = sorted_ghosts[ghost_index]
-            dist_ghost_pacman = get_maze_distance(pacman_pos, gstate.getPosition(), walls)
-            dist_ghost = max(0, 1.0 - (dist_ghost_pacman / MAX_DIST_GHOST_NORM))
-            features.append(dist_ghost) 
-            if gstate.scaredTimer > dist_ghost_pacman:
-                features.append(gstate.scaredTimer - dist_ghost_pacman)
-            else:
-                features.append(0.0)
-        else:
-            features.append(0.0)
-            features.append(0.0)
+    # 21. Timer Scared
+    features.append(scared_timer_val)
 
-    # Conversion finale en Tensor Float32
+    # 22. Ratio Capsules restantes
+    features.append(len(capsules) / 4.0 if len(capsules) > 0 else 0.0)
+
+    # 23. Danger immédiat global (Radar de panique)
+    features.append(calculate_score(pacman_pos, normal_ghosts_pos, walls))
+
+    # 24. Distance Capsule Sauvetage (Radar de sauvetage)
+    features.append(calculate_score(pacman_pos, capsules, walls))
+    
+    # 25. Biais constant
+    features.append(1.0)
+
     return torch.tensor(features, dtype=torch.float32)
 
 
-# --- CLASSE DATASET ---
-
 class PacmanDataset(Dataset):
     def __init__(self, path):
-        """
-        Charge les données brutes (pickles) et les convertit en tenseurs
-        prêts pour l'entraînement PyTorch.
-        """
         with open(path, "rb") as f:
             data = pickle.load(f)
 
         self.inputs = []
         self.actions = []
 
-        print(f"Traitement des données depuis {path}...")
+        print(f"Chargement des données séparées depuis {path}...")
+        dropped = 0
         
         for s, a in data:
-            # Feature Engineering : GameState -> Tensor
-            x = state_to_tensor(s)
+            if a == Directions.STOP:
+                dropped += 1
+                continue
             
-            # Label Encoding : 'North' -> 0
-            y = ACTION_TO_IDX[a]
-            
-            self.inputs.append(x)
-            self.actions.append(y)
-            
-        print(f"Chargement terminé : {len(self.inputs)} exemples prêts.")
+            self.inputs.append(state_to_tensor(s))
+            self.actions.append(ACTION_TO_IDX[a])
+
+        print(f"  - Données valides : {len(self.inputs)}")
+        print(f"  - Dimension Input : {self.inputs[0].shape[0]} (Cible: 25)")
+        print(f"  - Stops ignorés   : {dropped}")
 
     def __len__(self):
         return len(self.inputs)
 
     def __getitem__(self, idx):
-        # Retourne (features, label)
-        # label doit être LongTensor pour CrossEntropyLoss
-        return self.inputs[idx], torch.tensor(self.actions[idx], dtype=torch.long)
+        return (
+            self.inputs[idx],
+            torch.tensor(self.actions[idx], dtype=torch.long)
+        )
