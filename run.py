@@ -18,12 +18,13 @@ def set_seed(seed=42):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
+
 set_seed(50)
 
 input_size = 25
 pacman_model = "pacman_model.pth"
 model = PacmanNetwork(input_size)
-    
+
 # Charger les poids appris
 if os.path.exists(pacman_model):
     model.load_state_dict(torch.load(pacman_model, map_location="cpu"))
