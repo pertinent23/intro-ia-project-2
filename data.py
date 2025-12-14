@@ -1,14 +1,3 @@
-"""
-Extraction des features et Dataset pour Pacman.
-
-Toutes les features sont :
-- normalisées
-- informatives
-- adaptées à l'imitation learning
-
-Respecte la norme PEP-8.
-"""
-
 from collections import deque
 import pickle
 from typing import List, Tuple

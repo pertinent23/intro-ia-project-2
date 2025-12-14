@@ -1,15 +1,3 @@
-"""
-Réseau de neurones pour l'imitation d'un expert Pacman.
-
-Architecture multi-branches (late fusion) :
-- Branche directionnelle (analyse locale des actions)
-- Branche fantômes (menaces / opportunités)
-- Branche globale (état général de la partie)
-
-Conçu pour des features tabulaires (pas d'images).
-Respecte la norme PEP-8.
-"""
-
 import torch
 import torch.nn as nn
 
