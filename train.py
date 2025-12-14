@@ -43,14 +43,14 @@ class Pipeline(nn.Module):
         # Adam est un excellent optimiseur par défaut
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
-            lr=0.003
+            lr=0.0007
         )
         # Scheduler pour ajuster le learning rate en fonction de la perte
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode='min', factor=0.5, patience=10, verbose=True
         )
 
-    def train(self, epochs=300, batch_size=64, patience=15):
+    def train(self, epochs=300, batch_size=64, patience=25):
         print(f"Début de l'entraînement sur {len(self.train_dataset)} data")
 
         # DataLoader permet de créer des "batchs" (paquets) de données
