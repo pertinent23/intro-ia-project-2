@@ -18,7 +18,7 @@ class PacmanNetwork(nn.Module):
         self.net = nn.Sequential(
             # Couche d'entrée -> Couche cachée 1
             # On projette les features vers 128 neurones
-            nn.Linear(input_size, 256),
+            nn.Linear(input_size, 512),
             
             # Fonction d'activation Leaky ReLU
             # Elle introduit de la non-linéarité pour apprendre des fonctions complexes
@@ -27,31 +27,31 @@ class PacmanNetwork(nn.Module):
             
             # Couche cachée 1 -> Couche cachée 2
             # On réduit la dimensionnalité pour forcer le réseau à synthétiser l'info
-            nn.Linear(256, 128),
+            nn.Linear(512, 256),
             nn.LeakyReLU(),
             nn.Dropout(0.2),
             
             # Couche cachée 2 -> Couche cachée 3
             # On réduit la dimensionnalité pour forcer le réseau à synthétiser l'info
-            nn.Linear(128, 64),
+            nn.Linear(256, 128),
             nn.LeakyReLU(),
             nn.Dropout(0.1),
             
             # Couche cachée 3 -> Couche cachée 4
             # On réduit la dimensionnalité pour forcer le réseau à synthétiser l'info
-            nn.Linear(64, 32),
+            nn.Linear(128, 64),
             nn.LeakyReLU(),
             nn.Dropout(0.05),
             
             # Couche cachée 4 -> Couche cachée 5
             # On réduit la dimensionnalité pour forcer le réseau à synthétiser l'info
-            nn.Linear(32, 16),
+            nn.Linear(64, 32),
             nn.LeakyReLU(),
             
             
             # Couche cachée 5 -> Sortie
             # On projette vers les 5 actions possibles
-            nn.Linear(16, num_actions)
+            nn.Linear(32, num_actions)
         )
 
     def forward(self, x):

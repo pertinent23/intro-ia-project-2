@@ -27,8 +27,8 @@ class Pipeline(nn.Module):
         # Chargement du Dataset
         full_dataset = PacmanDataset(path)
         
-        # Séparation Train / Validation (65% / 35%)
-        train_size = int(0.65 * len(full_dataset))
+        # Séparation Train / Validation (90% / 15%)
+        train_size = int(0.90 * len(full_dataset))
         val_size = len(full_dataset) - train_size
         self.train_dataset, self.val_dataset = random_split(full_dataset, [train_size, val_size])
 
@@ -46,7 +46,7 @@ class Pipeline(nn.Module):
         # Scheduler pour ajuster le learning rate en fonction de la perte
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=2, verbose=True)
 
-    def train(self, epochs=90, batch_size=64, patience=15):
+    def train(self, epochs=150, batch_size=64, patience=15):
         print(f"Début de l'entraînement sur {len(self.train_dataset)} exemples...")
         
         # DataLoader permet de créer des "batchs" (paquets) de données
