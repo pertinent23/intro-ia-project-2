@@ -86,6 +86,7 @@ def state_to_tensor(state: GameState) -> torch.Tensor:
     food = state.getFood().asList()
     capsules = state.getCapsules()
     ghost_states = state.getGhostStates()
+    maze_width, maze_height = walls.width, walls.height
 
     normal_ghosts = []
     scared_ghosts = []
@@ -93,11 +94,17 @@ def state_to_tensor(state: GameState) -> torch.Tensor:
 
     for ghost in ghost_states:
         pos = tuple(map(int, ghost.getPosition()))
+        pos = ghost.getPosition()
+        g_info = {
+            'pos': (int(pos[0]), int(pos[1])),
+            'dir': ghost.getDirection(),
+            'scared_timer': ghost.scaredTimer
+        }
         if ghost.scaredTimer > 0:
-            scared_ghosts.append(pos)
+            scared_ghosts.append(g_info)
             scared_timer_sum += ghost.scaredTimer
         else:
-            normal_ghosts.append(pos)
+            normal_ghosts.append(g_info)
 
     avg_scared_timer = (
         scared_timer_sum / max(1, len(scared_ghosts)) / 40.0
@@ -128,32 +135,27 @@ def state_to_tensor(state: GameState) -> torch.Tensor:
             features.append(proximity_score(next_pos, normal_ghosts, walls))
 
     # ---------------- Fantômes (10) ----------------
+    def get_closest_ghost_features(ghost_list):
+        if len(ghost_list) < 1:
+            return [0.0] * 5
 
-    # Fantôme normal le plus proche
-    features.append(proximity_score(pacman_pos, normal_ghosts, walls))
-    if normal_ghosts:
-        gx, gy = normal_ghosts[0]
-        features.extend([
-            (gx - pac_x) / walls.width,
-            (gy - pac_y) / walls.height,
-            1.0,  # indicateur présence
-            0.0,
-        ])
-    else:
-        features.extend([0.0, 0.0, 0.0, 0.0])
+        closest_ghost = min(
+            ghost_list,
+            key=lambda g: bfs_distance(pacman_pos, g['pos'], walls)
+        )
 
-    # Fantôme effrayé le plus proche
-    features.append(proximity_score(pacman_pos, scared_ghosts, walls))
-    if scared_ghosts:
-        gx, gy = scared_ghosts[0]
-        features.extend([
-            (gx - pac_x) / walls.width,
-            (gy - pac_y) / walls.height,
-            0.0,
-            1.0,
-        ])
-    else:
-        features.extend([0.0, 0.0, 0.0, 0.0])
+        dist = bfs_distance(pacman_pos, closest_ghost['pos'], walls)
+
+        proximity = 1.0 / (dist + 1.0)
+        dx = (closest_ghost['pos'][0] - pacman_pos[0]) / maze_width
+        dy = (closest_ghost['pos'][1] - pacman_pos[1]) / maze_height
+
+        vx, vy = Actions.directionToVector(closest_ghost['dir'])
+
+        return [proximity, dx, dy, vx, vy]
+
+    features.extend(get_closest_ghost_features(normal_ghosts))
+    features.extend(get_closest_ghost_features(scared_ghosts))
 
     # ---------------- Globales (5) ----------------
     features.append(avg_scared_timer)

@@ -39,18 +39,18 @@ class Pipeline(nn.Module):
         self.model = PacmanNetwork()
         # Fonction de coût et Optimiseur
         # CrossEntropyLoss est standard pour la classification
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss(label_smoothing=0.01)
         # Adam est un excellent optimiseur par défaut
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
-            lr=0.001
+            lr=0.003
         )
         # Scheduler pour ajuster le learning rate en fonction de la perte
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.1, patience=2, verbose=True
+            self.optimizer, mode='min', factor=0.5, patience=10, verbose=True
         )
 
-    def train(self, epochs=150, batch_size=64, patience=15):
+    def train(self, epochs=300, batch_size=64, patience=15):
         print(f"Début de l'entraînement sur {len(self.train_dataset)} data")
 
         # DataLoader permet de créer des "batchs" (paquets) de données
