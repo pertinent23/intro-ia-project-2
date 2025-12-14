@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader, random_split
 from architecture import PacmanNetwork
 from data import PacmanDataset
 
+
 def set_seed(seed=42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -13,7 +14,9 @@ def set_seed(seed=42):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
+
 set_seed(50)
+
 
 class Pipeline(nn.Module):
     def __init__(self, path, model_save_path="pacman_model.pth"):
@@ -21,43 +24,51 @@ class Pipeline(nn.Module):
         Initialise le pipeline d'entraînement.
         """
         super().__init__()
-        
         self.model_save_path = model_save_path
-
         # Chargement du Dataset
         full_dataset = PacmanDataset(path)
-        
         # Séparation Train / Validation (90% / 15%)
         train_size = int(0.90 * len(full_dataset))
         val_size = len(full_dataset) - train_size
-        self.train_dataset, self.val_dataset = random_split(full_dataset, [train_size, val_size])
-
+        self.train_dataset, self.val_dataset = random_split(
+            full_dataset, [train_size, val_size]
+        )
         # Initialisation du modèle
         # On récupère dynamiquement la taille de l'input (nombre de features)
         input_size = full_dataset[0][0].shape[0]
         self.model = PacmanNetwork(input_size)
-
         # Fonction de coût et Optimiseur
         # CrossEntropyLoss est standard pour la classification
         self.criterion = nn.CrossEntropyLoss()
         # Adam est un excellent optimiseur par défaut
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
-
         # Scheduler pour ajuster le learning rate en fonction de la perte
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1, patience=2, verbose=True)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode='min', factor=0.1, patience=2, verbose=True
+        )
 
     def train(self, epochs=150, batch_size=64, patience=15):
-        print(f"Début de l'entraînement sur {len(self.train_dataset)} exemples...")
-        
+        print(f"Début de l'entraînement sur {len(self.train_dataset)} data")
+
         # DataLoader permet de créer des "batchs" (paquets) de données
-        train_loader = DataLoader(self.train_dataset, batch_size=batch_size, shuffle=True)
-        val_loader = DataLoader(self.val_dataset, batch_size=batch_size, shuffle=False)
+        train_loader = DataLoader(
+            self.train_dataset,
+            batch_size=batch_size,
+            shuffle=True
+        )
+
+        val_loader = DataLoader(
+            self.val_dataset,
+            batch_size=batch_size,
+            shuffle=False
+        )
 
         best_loss = float('inf')
         best_acc = float('inf')
         patience_counter = 0
         for epoch in range(epochs):
-            self.model.train() # Mode entraînement (active le dropout si présent)
+            # Mode entraînement (active le dropout si présent)
+            self.model.train()
             total_loss = 0
             correct = 0
             total = 0
@@ -89,9 +100,11 @@ class Pipeline(nn.Module):
             avg_loss = total_loss / len(train_loader)
             val_acc, val_loss = self.evaluate(val_loader)
 
-            print(f"Epoch [{epoch+1}/{epochs}] | Loss: {avg_loss:.4f} | Train Acc: {train_acc:.2f}% | Val Acc: {val_acc:.2f}%")
+            info = f"Epoch [{epoch+1}/{epochs}] | Loss: {avg_loss:.2f}"
+            info += f" | Train Acc: {train_acc:.2f}% | Val Acc: {val_acc:.2f}%"
+            print(info)
 
-           # Sauvegarde & Early Stopping
+            # Sauvegarde & Early Stopping
             if val_loss <= best_loss or val_acc >= best_acc:
                 best_loss = val_loss
                 best_acc = val_acc
@@ -105,18 +118,19 @@ class Pipeline(nn.Module):
             if patience_counter >= patience:
                 print(f"Early Stopping à l'époque {epoch+1}")
                 break
-        
         print(f"Entraînement terminé avec {best_acc:.2f}% {best_loss}")
 
     def evaluate(self, loader):
         """
         Évalue le modèle sans l'entraîner (pas de gradient).
         """
-        self.model.eval() # Mode évaluation
+        # Mode évaluation
+        self.model.eval()
         correct = 0
         total_loss = 0
         total = 0
-        with torch.no_grad(): # Désactive le calcul des gradients pour aller plus vite
+        # Désactive le calcul des gradients pour aller plus vite
+        with torch.no_grad():
             for inputs, labels in loader:
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, labels)
@@ -124,8 +138,8 @@ class Pipeline(nn.Module):
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
-        
         return 100 * correct / total, total_loss / len(loader)
+
 
 if __name__ == "__main__":
     pipeline = Pipeline(path="datasets/pacman_dataset.pkl")

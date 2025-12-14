@@ -22,13 +22,16 @@ ACTION_TO_IDX = {
 
 INDEX_TO_ACTION_MAP = {v: k for k, v in ACTION_TO_IDX.items()}
 
+
 def get_maze_distance(start, target, walls):
     """
     Calcule la distance réelle (BFS). Retourne 999 si inaccessible.
     """
-    if start == target: return 0
+    if start == target:
+        return 0
     w, h = walls.width, walls.height
-    if not (0 <= target[0] < w and 0 <= target[1] < h) or walls[int(target[0])][int(target[1])]:
+    if not (0 <= target[0] < w and 0 <= target[1] < h) \
+            or walls[int(target[0])][int(target[1])]:
         return 999
 
     queue = deque([(start, 0)])
@@ -47,6 +50,7 @@ def get_maze_distance(start, target, walls):
                     queue.append(((nx, ny), dist + 1))
     return 999
 
+
 def calculate_score(pos, targets, walls):
     """
     Trouve la cible la plus proche et retourne 1 / (Distance + 1).
@@ -55,17 +59,19 @@ def calculate_score(pos, targets, walls):
     """
     if not targets:
         return 0.0
-    
+
     # 1. Heuristique rapide : Trouver la cible la plus proche à vol d'oiseau
-    closest_target = min(targets, key=lambda t: abs(t[0]-pos[0]) + abs(t[1]-pos[1]))
-    
+    closest_target = min(
+        targets, key=lambda t: abs(t[0]-pos[0]) + abs(t[1]-pos[1])
+    )
+
     # 2. Calcul précis : BFS seulement vers cette cible
     dist = get_maze_distance(pos, closest_target, walls)
-    
+
     if dist >= 999:
         return 0.0
-        
     return 1.0 / (dist + 1.0)
+
 
 def is_trap(start_pos, current_direction, walls, ghosts_pos):
     """
@@ -73,14 +79,16 @@ def is_trap(start_pos, current_direction, walls, ghosts_pos):
     """
     dx, dy = Actions.directionToVector(current_direction)
     curr_x, curr_y = int(start_pos[0] + dx), int(start_pos[1] + dy)
-    
-    if walls[curr_x][curr_y]: return True
+
+    if walls[curr_x][curr_y]:
+        return True
 
     # Vérification simplifiée de proximité immédiate d'un fantôme
     for g_pos in ghosts_pos:
         if abs(g_pos[0] - curr_x) + abs(g_pos[1] - curr_y) <= 1:
-            return True 
+            return True
     return False
+
 
 def state_to_tensor(state: GameState):
     """
@@ -108,7 +116,12 @@ def state_to_tensor(state: GameState):
             normal_ghosts_pos.append(pos)
 
     features = []
-    directions = [Directions.NORTH, Directions.SOUTH, Directions.EAST, Directions.WEST]
+    directions = [
+        Directions.NORTH,
+        Directions.SOUTH,
+        Directions.EAST,
+        Directions.WEST
+    ]
 
     # --- PARTIE A : ANALYSE PAR DIRECTION (4 dir * 5 features = 20) ---
     for action in directions:
@@ -118,15 +131,14 @@ def state_to_tensor(state: GameState):
 
         # 1. MUR / PIÈGE
         is_blocked = False
-        if walls[next_x][next_y] or is_trap(pacman_pos, action, walls, normal_ghosts_pos):
+        if walls[next_x][next_y] or\
+                is_trap(pacman_pos, action, walls, normal_ghosts_pos):
             is_blocked = True
-        
         if is_blocked:
             # Ordre: [Mur, Food, Cap, Scared, Danger]
             # Si mur, tout est 0 sauf l'index mur
             features.extend([1.0, 0.0, 0.0, 0.0, 0.0])
             continue
-        
         # Si voie libre : Mur = 0
         features.append(0.0)
 
@@ -142,9 +154,7 @@ def state_to_tensor(state: GameState):
         # 5. DANGER SCORE (On veut fuir - Fantôme Normal)
         features.append(calculate_score(next_pos, normal_ghosts_pos, walls))
 
-
     # --- PARTIE B : GLOBAL INFO (5 features) ---
-    
     # 21. Timer Scared
     features.append(scared_timer_val)
 
@@ -156,7 +166,7 @@ def state_to_tensor(state: GameState):
 
     # 24. Distance Capsule Sauvetage (Radar de sauvetage)
     features.append(calculate_score(pacman_pos, capsules, walls))
-    
+
     # 25. Biais constant
     features.append(1.0)
 
@@ -173,12 +183,12 @@ class PacmanDataset(Dataset):
 
         print(f"Chargement des données séparées depuis {path}...")
         dropped = 0
-        
+
         for s, a in data:
             if a == Directions.STOP:
                 dropped += 1
                 continue
-            
+
             self.inputs.append(state_to_tensor(s))
             self.actions.append(ACTION_TO_IDX[a])
 

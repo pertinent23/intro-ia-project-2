@@ -2,12 +2,12 @@ import pickle
 import torch
 import pandas as pd
 
-from data import state_to_tensor
 from architecture import PacmanNetwork
 from pacmanagent import PacmanAgent
 
 
 class SubmissionWriter:
+
     def __init__(self, test_set_path, model_path):
         """
         Initialize the writing of your submission.
@@ -24,7 +24,6 @@ class SubmissionWriter:
         self.model = PacmanNetwork(25)
         self.model.load_state_dict(torch.load(model_path, map_location="cpu"))
         self.model.eval()
-
 
     def predict_on_testset(self):
         """
