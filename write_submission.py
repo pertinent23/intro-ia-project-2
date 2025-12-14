@@ -21,7 +21,7 @@ class SubmissionWriter:
         with open(test_set_path, "rb") as f:
             self.test_set = pickle.load(f)
 
-        self.model = PacmanNetwork(25)
+        self.model = PacmanNetwork()
         self.model.load_state_dict(torch.load(model_path, map_location="cpu"))
         self.model.eval()
 

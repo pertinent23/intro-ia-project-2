@@ -27,21 +27,24 @@ class Pipeline(nn.Module):
         self.model_save_path = model_save_path
         # Chargement du Dataset
         full_dataset = PacmanDataset(path)
-        # Séparation Train / Validation (90% / 15%)
-        train_size = int(0.90 * len(full_dataset))
+        # Séparation Train / Validation (80% / 20%)
+        train_size = int(0.80 * len(full_dataset))
         val_size = len(full_dataset) - train_size
         self.train_dataset, self.val_dataset = random_split(
             full_dataset, [train_size, val_size]
         )
         # Initialisation du modèle
         # On récupère dynamiquement la taille de l'input (nombre de features)
-        input_size = full_dataset[0][0].shape[0]
-        self.model = PacmanNetwork(input_size)
+        # input_size = full_dataset[0][0].shape[0]
+        self.model = PacmanNetwork()
         # Fonction de coût et Optimiseur
         # CrossEntropyLoss est standard pour la classification
         self.criterion = nn.CrossEntropyLoss()
         # Adam est un excellent optimiseur par défaut
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(),
+            lr=0.001
+        )
         # Scheduler pour ajuster le learning rate en fonction de la perte
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode='min', factor=0.1, patience=2, verbose=True
@@ -63,8 +66,8 @@ class Pipeline(nn.Module):
             shuffle=False
         )
 
-        best_loss = float('inf')
-        best_acc = float('inf')
+        best_loss = 2
+        best_acc = 0.0
         patience_counter = 0
         for epoch in range(epochs):
             # Mode entraînement (active le dropout si présent)
@@ -100,16 +103,19 @@ class Pipeline(nn.Module):
             avg_loss = total_loss / len(train_loader)
             val_acc, val_loss = self.evaluate(val_loader)
 
-            info = f"Epoch [{epoch+1}/{epochs}] | Loss: {avg_loss:.2f}"
+            info = f"Epoch [{epoch+1}/{epochs}] | Train Loss: {avg_loss:.4f}"
+            info += f" | Val Loss: {val_loss:.4f} "
             info += f" | Train Acc: {train_acc:.2f}% | Val Acc: {val_acc:.2f}%"
             print(info)
 
             # Sauvegarde & Early Stopping
-            if val_loss <= best_loss or val_acc >= best_acc:
+            if val_acc - best_acc >= 0.001 \
+                    and abs(val_loss - best_loss) >= 0.0001:
                 best_loss = val_loss
                 best_acc = val_acc
                 patience_counter = 0
                 torch.save(self.model.state_dict(), self.model_save_path)
+                print(f"Enrégistrement avec: {best_acc:.2f}% {best_loss:.4f}")
             else:
                 patience_counter += 1
 

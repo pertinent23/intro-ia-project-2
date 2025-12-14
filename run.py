@@ -21,9 +21,9 @@ def set_seed(seed=42):
 
 set_seed(50)
 
-input_size = 25
+# input_size = 35
 pacman_model = "pacman_model.pth"
-model = PacmanNetwork(input_size)
+model = PacmanNetwork()
 
 # Charger les poids appris
 if os.path.exists(pacman_model):
