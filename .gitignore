@@ -175,3 +175,4 @@ pip-wheel-metadata/
 
 *.csv
 mnist.ipynb
+*.zip
