@@ -1,3 +1,4 @@
+from collections import Counter
 import torch
 import torch.nn as nn
 import numpy as np
@@ -33,13 +34,27 @@ class Pipeline(nn.Module):
         self.train_dataset, self.val_dataset = random_split(
             full_dataset, [train_size, val_size]
         )
+
+        labels = [label for _, label in full_dataset]
+        counts = Counter(labels)
+        total = sum(counts.values())
+
+        weights = []
+        for i in range(5):
+            freq = counts.get(i, 1)
+            weights.append(total / freq)
+
+        class_weights = torch.tensor(weights, dtype=torch.float32)
         # Initialisation du modèle
         # On récupère dynamiquement la taille de l'input (nombre de features)
         # input_size = full_dataset[0][0].shape[0]
         self.model = PacmanNetwork()
         # Fonction de coût et Optimiseur
         # CrossEntropyLoss est standard pour la classification
-        self.criterion = nn.CrossEntropyLoss(label_smoothing=0.01)
+        self.criterion = nn.CrossEntropyLoss(
+            weight=class_weights,
+            label_smoothing=0.01
+        )
         # Adam est un excellent optimiseur par défaut
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
