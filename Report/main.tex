@@ -1,0 +1,114 @@
+\documentclass[a4paper,12pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{bibentry}
+\nobibliography*
+%\robustify{\bibentry}
+\usepackage{mathtools}
+\usepackage [french]{babel}
+\usepackage{listings}
+\usepackage{CJKutf8}
+\usepackage{amsmath,amssymb} %besoin pour les équations
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{gensymb}
+\usepackage{tikz-qtree}
+\usepackage{listings}
+%\usepackage[numbered,framed,autolinebreaks]{mcode}
+%\usepackage{slashbox,pict2e}
+\usepackage{enumerate}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\hypersetup{
+     colorlinks = true,
+     linkcolor = black, %or red ? idk
+     anchorcolor = blue,
+     citecolor = blue,
+     filecolor = blue,
+     urlcolor = blue
+     }
+
+%code
+% Change le nom par défaut des listing
+\renewcommand{\lstlistingname}{Extrait de Code}
+
+% Change la police des titres pour convenir à votre seul lecteur
+\usepackage{sectsty}
+\allsectionsfont{\sffamily\mdseries\upshape}
+% Idem pour la table des matière.
+\usepackage[nottoc,notlof,notlot]{tocbibind}
+\usepackage[titles,subfigure]{tocloft}
+\renewcommand{\cftsecfont}{\rmfamily\mdseries\upshape}
+\renewcommand{\cftsecpagefont}{\rmfamily\mdseries\upshape}
+
+\definecolor{mygray}{rgb}{0.5,0.5,0.5}
+\newcommand{\coms}[1]{\textcolor{MidnightBlue}{#1}}
+
+%% marges
+\usepackage{geometry}
+\geometry{top=2cm, bottom=2cm, left=2cm , right=2cm}
+\usepackage{fancyhdr}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{cmat}
+\setlength{\parskip}{1ex plus 0.5ex minus 0.2ex}
+\newcommand{\hsp}{\hspace{20pt}}
+\newcommand{\HRule}{\rule{\linewidth}{0.5mm}}
+\usepackage{titlesec}
+\titlelabel{\thetitle.\quad}
+\newcommand{\tablemat}{~}
+\renewcommand{\tablemat}{\tableofcontents}
+
+%%bigcenter
+\makeatletter
+ 
+\newskip\@bigflushglue \@bigflushglue = -100pt plus 1fil
+\def\bigcenter{\trivlist \bigcentering\item\relax}
+\def\bigcentering{\let\\\@centercr\rightskip\@bigflushglue%
+\leftskip\@bigflushglue
+\parindent\z@\parfillskip\z@skip}
+\def\endbigcenter{\endtrivlist}
+ \usepackage[T1]{fontenc}
+\makeatother
+%\newcommand{\matlab}[1]{\texttt{#1}}
+
+
+\begin{document}
+\begin{titlepage}
+   \begin{center}
+
+    % Upper part of the page. The '~' is needed because \\
+    % only works if a paragraph has started.
+    \includegraphics[scale=0.4]{logo-uliege.jpg}~\\[1.5cm]
+
+    \textsc{\LARGE Université de Liège}\\[2cm]
+
+    % Title
+    \HRule \\[0.4cm]
+    { \huge Nom de cours - Code du cours\\[0.4cm] }
+
+    \HRule \\[1cm]
+    
+    \textsc{ \Large Sujet du document}\\[2cm]
+    \vspace{2cm}
+    % Author and supervisor
+    \begin{minipage}{0.3\textwidth}
+      \begin{flushleft} \large
+        Name \textsc{SURNAME}\\
+      \end{flushleft}
+    \end{minipage}
+
+    \vfill
+
+    % Bottom of the page
+    {\large Année académique année-année}
+
+  \end{center}
+\end{titlepage}
+
+\tablemat
+\newpage
+
+\end{document}

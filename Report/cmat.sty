@@ -1,0 +1,66 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{cmat}[2013/01/13 Custom Package]
+% ---------------------------------------------------------------------------------
+
+\def\lstbasicfont{\fontfamily{pcr}\selectfont\footnotesize}
+\usepackage{color}
+\definecolor{mygreen}{RGB}{28,172,0} % color values Red, Green, Blue
+\definecolor{mylilas}{RGB}{170,55,241}
+\usepackage{textcomp}
+\usepackage{listings}
+\lstloadlanguages{R}
+    \lstset{language=R}
+    \lstset{%
+        inputencoding=utf8,
+            extendedchars=true,
+            literate=%
+            {é}{{\'{e}}}1
+            {è}{{\`{e}}}1
+            {ê}{{\^{e}}}1
+            {ë}{{\¨{e}}}1
+            {û}{{\^{u}}}1
+            {ù}{{\`{u}}}1
+            {â}{{\^{a}}}1
+            {à}{{\`{a}}}1
+            {î}{{\^{i}}}1
+            {ô}{{\^{o}}}1
+            {ç}{{\c{c}}}1
+            {Ç}{{\c{C}}}1
+            {É}{{\'{E}}}1
+            {Ê}{{\^{E}}}1
+            {À}{{\`{A}}}1
+            {Â}{{\^{A}}}1
+            {Î}{{\^{I}}}1
+    }
+
+\lstset{language = Matlab,%
+    breaklines = true
+    morekeywords={matlab2tikz},
+    keywordstyle=\color{blue},%
+    morekeywords=[2]{1}, keywordstyle=[2]{\color{black}},
+    identifierstyle=\color{black},%
+    stringstyle=\color{mylilas},
+    commentstyle=\color{mygreen},%
+    basicstyle={\lstbasicfont},
+    showstringspaces=false,             
+    tabsize=4,                                 
+    mathescape=false,escapechar=§,              
+    upquote=true,                               
+    aboveskip={1.5\baselineskip},               
+    numbersep=3mm,
+    numbers=left,
+    numberstyle=\tiny,
+    frame=single,
+    rulecolor=\color{black},
+    framexleftmargin=6mm,
+    xleftmargin=6mm,
+    emph=[1]{mode,histogram, kstest2, cdfplot, suptitle, randsample, tblread, quantile, boxplot, samplerand, datasample, linspace, magn_resp, audioread, xcorr, figure, plot, filter, sound},emphstyle=[1]\color{blue},
+    }
+\newcommand{\cmat}[1]{\lstinline[basicstyle=\lstbasicfont\small]|#1|}
+
+\makeatletter 
+\lst@CCPutMacro\lst@ProcessOther {"2D}{\lst@ttfamily{-{}}{-{}}} 
+\@empty\z@\@empty 
+\makeatother
+
+\endinput
