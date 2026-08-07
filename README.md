@@ -21,7 +21,7 @@ $ conda install pandas
 ```
 To get familiar with the PyTorch library, neural networks and how to train them, we have provided a completed notebook [`mnist.ipynb`](./mnist.ipynb) that solves an inpainting task on the MNIST dataset using a multi-layer perceptron (MLP).
 
-You also saw during [Lecture 7](https://glouppe.github.io/info8006-introduction-to-ai/?p=lecture7.md) the comparison between an MLP and a CNN ([`lecture7-convnet.ipynb`](../../code/lecture7-convnet.ipynb)) and a multi-class classification task ([`lecture7-spiral.ipynb`](../../code/lecture7-spiral.ipynb)).
+You also saw during [Lecture 7](/lecture7/lec7.pdf) the comparison between an MLP and a CNN ([`lecture7-convnet.ipynb`](/lecture7/lecture7-convnet.ipynb)) and a multi-class classification task ([`lecture7-spiral.ipynb`](/lecture7/lecture7-spiral.ipynb)).
 
 You may use our implementations as inspiration, but be careful: the task and data format may differ in this project.
 
@@ -31,7 +31,7 @@ In this project, Pacman got tired of having to learn a strategy against a smarty
 
 He disposes of a dataset `pacman_dataset.pkl` containing GameState-action pairs taken by the expert.
 
-Your task is to perform **imitation learning** (see [Lecture 7](https://glouppe.github.io/info8006-introduction-to-ai/?p=lecture7.md)) on the expert's actions in order to achieve the best possible score while avoiding a walking ghost that would kill him if it reaches his position.
+Your task is to perform **imitation learning** (see [Lecture 7](/lecture7/lec7.pdf)) on the expert's actions in order to achieve the best possible score while avoiding a walking ghost that would kill him if it reaches his position.
 
 You need to:
 - Handle the dataset and extract relevant features from the complete GameState object (see [pacman.py](pacman_module/pacman.py) file for more information). The class `PacmanDataset` may be completed accordingly.
@@ -45,9 +45,6 @@ $ python train.py
 $ python run.py 
 ```
 to see your agent perform in a game. Pay attention that the score obtained by your agent on a test layout does **NOT** reflect its performance compared to that of the expert it is trying to imitate, and therefore does not represent the score obtained on the leaderboard. 
-
-
-To get started, download and extract the [archive](../project2.zip?raw=true) of the project in the directory of your choice. 
 
 **Note:** by “*may be completed accordingly,*” we mean that we are proposing a structure for your code. The use of our structure is entirely optional and is provided solely for your convenience. 
 
@@ -73,14 +70,3 @@ Your project will be evaluated as follow:
     - **Style** (5%): You are awarded the maximal grade if your code is PEP-8 compliant and no points otherwise. This test is public.
 
 - A bonus will be awarded based on your position in the **private leaderboard**. This bonus is worth 1 point for first place and decreases linearly to last place. 
-
-
-### Oral exam
-
-The evaluation of the projects will also include a short oral exam (5-10 min per student). Our goal is not to re-assess the projects themselves, but rather to ensure that each student can explain and justify the choices made in the projects (algorithms or models) as well as their implementation details (code). In an era where AI tools can do more than ever, we believe it is critical that you demonstrate your own understanding and skills.
-
-We will design the oral exam such that it should be a formality for students who have worked properly on the projects by themselves. This means that you should be able to discuss your work confidently and clearly. This oral exam will be individual (not in groups).
-
-If you pass the oral exam, you will receive the project grades as assigned. If you fail the oral exam, your project grades will be set to zero.
-
-The oral exams will take place during the last week of December. A schedule will be shared in due course.
