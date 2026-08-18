@@ -33,6 +33,31 @@
 % Change le nom par défaut des listing
 \renewcommand{\lstlistingname}{Extrait de Code}
 
+% Style Python pour les listings
+\usepackage{xcolor}
+\lstdefinestyle{python}{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue}\bfseries,
+    stringstyle=\color{teal},
+    commentstyle=\color{gray}\itshape,
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    numbersep=8pt,
+    breaklines=true,
+    showstringspaces=false,
+    frame=single,
+    xleftmargin=1em,
+    tabsize=4,
+    extendedchars=true,
+    inputencoding=utf8,
+    literate=
+        {é}{{\'e}}1 {è}{{\`e}}1 {à}{{\`a}}1 {ê}{{\^e}}1
+        {î}{{\^i}}1 {ô}{{\^o}}1 {û}{{\^u}}1 {ç}{{\c c}}1
+        {É}{{\'E}}1 {È}{{\`E}}1 {À}{{\`A}}1 {ù}{{\`u}}1,
+}
+\lstset{style=python}
+
 % Change la police des titres pour convenir à votre seul lecteur
 \usepackage{sectsty}
 \allsectionsfont{\sffamily\mdseries\upshape}
@@ -63,7 +88,7 @@
 
 %%bigcenter
 \makeatletter
- 
+
 \newskip\@bigflushglue \@bigflushglue = -100pt plus 1fil
 \def\bigcenter{\trivlist \bigcentering\item\relax}
 \def\bigcentering{\let\\\@centercr\rightskip\@bigflushglue%
@@ -87,28 +112,1365 @@
 
     % Title
     \HRule \\[0.4cm]
-    { \huge Nom de cours - Code du cours\\[0.4cm] }
+    { \huge Apprentissage par imitation pour Pacman\\[0.4cm] }
 
     \HRule \\[1cm]
-    
-    \textsc{ \Large Sujet du document}\\[2cm]
+
+    \textsc{ \Large Rapport technique -- Projet 2}\\[2cm]
     \vspace{2cm}
     % Author and supervisor
     \begin{minipage}{0.3\textwidth}
       \begin{flushleft} \large
-        Name \textsc{SURNAME}\\
+        Lucas \textsc{Bauduin}\\
+        Franck Duval \textsc{Heuba Batomen}\\
+        Morgan \textsc{Phemba}\\
       \end{flushleft}
     \end{minipage}
 
     \vfill
 
     % Bottom of the page
-    {\large Année académique année-année}
+    {\large Année académique 2025-2026}
 
   \end{center}
 \end{titlepage}
 
 \tablemat
 \newpage
+
+\section{Introduction et vue d'ensemble}
+
+Ce document décrit en détail l'implémentation réalisée par l'équipe pour le
+Projet 2 (\emph{Imitation Learning} appliqué à Pacman). L'objectif du
+projet est d'entraîner un agent Pacman à imiter les décisions d'un expert
+à partir d'un jeu de données de paires \texttt{(GameState, action)}, puis
+d'utiliser le modèle entraîné pour jouer de façon autonome tout en évitant
+un fantôme mobile (\texttt{SmartyGhost}).
+
+Seuls les fichiers écrits par l'équipe sont couverts ici -- \textbf{pas}
+\texttt{pacman\_module/*}, qui est le moteur de jeu fourni par
+l'enseignant. Ces fichiers sont :
+
+\begin{itemize}
+    \item \texttt{data.py} : extraction des features à partir d'un
+    \texttt{GameState} et \texttt{Dataset} PyTorch,
+    \item \texttt{architecture.py} : le réseau de neurones
+    \texttt{PacmanNetwork},
+    \item \texttt{train.py} : la boucle d'entraînement (\texttt{Pipeline}),
+    \item \texttt{pacmanagent.py} : l'agent qui transforme les prédictions
+    du réseau en action de jeu,
+    \item \texttt{run.py} : script de visualisation d'une partie jouée par
+    l'agent,
+    \item \texttt{write\_submission.py} : génération du fichier
+    \texttt{submission.csv} pour le classement Gradescope.
+\end{itemize}
+
+Le pipeline complet est le suivant :
+\texttt{pacman\_dataset.pkl} $\rightarrow$ \texttt{state\_to\_tensor}
+(dans \texttt{data.py}) $\rightarrow$ \texttt{PacmanNetwork} (entraîné par
+\texttt{train.py}) $\rightarrow$ \texttt{pacman\_model.pth}
+$\rightarrow$ \texttt{PacmanAgent} (dans \texttt{pacmanagent.py}), utilisé
+soit par \texttt{run.py} pour visualiser une partie, soit par
+\texttt{write\_submission.py} pour générer les prédictions sur le jeu de
+test.
+
+\emph{Note pédagogique} : lors de la relecture de ce rapport, deux
+problèmes ont été identifiés puis corrigés dans le code -- ils sont
+signalés et expliqués aux endroits concernés (sections~\ref{sec:bug-ghost},
+\ref{sec:artifice-init}, \ref{sec:artifice-dropout} et
+\ref{sec:artifice-save}), car ils constituent un retour d'expérience utile
+à connaître pour l'oral.
+
+\newpage
+\section{\texttt{data.py} -- extraction des features et \texttt{Dataset}}
+
+Ce fichier a deux responsabilités : (1) transformer un objet
+\texttt{GameState} du moteur de jeu en un vecteur de 35 nombres
+(\texttt{state\_to\_tensor}), et (2) exposer ce vecteur sous la forme d'un
+\texttt{torch.utils.data.Dataset} exploitable par un \texttt{DataLoader}
+(\texttt{PacmanDataset}).
+
+\subsection{Table de correspondance action $\leftrightarrow$ index}
+
+\begin{lstlisting}
+ACTION_TO_INDEX = {
+    Directions.NORTH: 0,
+    Directions.SOUTH: 1,
+    Directions.EAST: 2,
+    Directions.WEST: 3,
+    Directions.STOP: 4,
+}
+
+INDEX_TO_ACTION_MAP = {v: k for k, v in ACTION_TO_INDEX.items()}
+\end{lstlisting}
+
+Le réseau ne peut pas manipuler directement des chaînes de caractères
+comme \texttt{"North"} : il produit un vecteur de 5 scores (un par classe).
+\texttt{ACTION\_TO\_INDEX} fixe une convention arbitraire mais fixe :
+index 0 = NORTH, 1 = SOUTH, 2 = EAST, 3 = WEST, 4 = STOP. C'est cette
+table qui sert à construire les labels du \texttt{Dataset}.
+\texttt{INDEX\_TO\_ACTION\_MAP} est simplement la table inverse
+(dictionnaire en compréhension), utilisée côté agent pour retraduire un
+index de sortie du réseau en direction de jeu.
+
+\subsection{\texttt{bfs\_distance} -- distance dans le labyrinthe}
+
+\begin{lstlisting}
+def bfs_distance(
+    start: Tuple[int, int],
+    targets: List[Tuple[int, int]],
+    walls,
+) -> int:
+    """Calcule la distance BFS vers l'une des cibles."""
+    if not targets:
+        return 999
+
+    queue = deque([(start, 0)])
+    visited = {start}
+
+    while queue:
+        (x, y), dist = queue.popleft()
+        if (x, y) in targets:
+            return dist
+
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+            nx, ny = x + dx, y + dy
+            if not walls[nx][ny] and (nx, ny) not in visited:
+                visited.add((nx, ny))
+                queue.append(((nx, ny), dist + 1))
+
+    return 999
+\end{lstlisting}
+
+\textbf{Pourquoi une distance BFS et pas une distance euclidienne ou de
+Manhattan ?} Le labyrinthe contient des murs : la distance
+"à vol d'oiseau" est trompeuse (deux cases proches en ligne droite peuvent
+être séparées par un mur et donc très loin en pratique). BFS calcule la
+distance \emph{réelle} en nombre de déplacements, ce qui est l'information
+pertinente pour un agent qui doit se déplacer case par case.
+
+Paramètres :
+\begin{itemize}
+    \item \texttt{start} : position \texttt{(x, y)} de départ (entiers,
+    coordonnées de grille),
+    \item \texttt{targets} : liste de positions \texttt{(x, y)} dont on
+    veut la distance à la plus proche,
+    \item \texttt{walls} : la grille de murs du \texttt{GameState}
+    (objet indexable \texttt{walls[x][y]} $\to$ \texttt{bool}).
+\end{itemize}
+
+Ligne par ligne :
+\begin{itemize}
+    \item \texttt{if not targets: return 999} -- s'il n'y a aucune cible
+    (par exemple aucun fantôme apeuré), on retourne une distance
+    "infinie" conventionnelle (999) plutôt que de planter ou de renvoyer
+    une valeur ambiguë comme 0 (qui signifierait "sur la cible").
+    \item \texttt{queue = deque([(start, 0)])} -- une file (FIFO) pour un
+    parcours en largeur, initialisée avec le point de départ à distance 0.
+    \texttt{deque} est utilisé plutôt qu'une simple \texttt{list} car
+    \texttt{popleft()} est en $O(1)$ contre $O(n)$ pour
+    \texttt{list.pop(0)} -- important vu que cette fonction est appelée
+    de nombreuses fois par état de jeu.
+    \item \texttt{visited = \{start\}} -- ensemble des cases déjà
+    explorées, pour ne jamais retraiter une case (complexité $O(1)$ par
+    test d'appartenance grâce au \texttt{set}).
+    \item La boucle \texttt{while queue} dépile la case courante
+    \texttt{(x, y)} avec sa distance \texttt{dist}. Si c'est une cible
+    (\texttt{(x, y) in targets}), on retourne immédiatement \texttt{dist}
+    -- BFS garantit que la première fois qu'on atteint une cible, c'est
+    par le chemin le plus court.
+    \item La boucle interne \texttt{for dx, dy in [...]} énumère les 4
+    voisins orthogonaux (Nord/Sud/Est/Ouest en delta de coordonnées). Pour
+    chacun, on vérifie \texttt{not walls[nx][ny]} (case libre) et
+    \texttt{(nx, ny) not in visited} avant de l'ajouter à la file avec
+    \texttt{dist + 1}.
+    \item Si la file se vide sans avoir atteint de cible (cible
+    inaccessible, cas normalement rare dans un labyrinthe connexe), on
+    retourne \texttt{999}.
+\end{itemize}
+
+\textbf{Remarque importante (bug corrigé, voir
+section~\ref{sec:bug-ghost})} : cette fonction suppose que \texttt{targets}
+est bien une liste de tuples \texttt{(x, y)}, car le test
+\texttt{(x, y) in targets} compare directement des tuples. Si on lui
+passe autre chose (par exemple une liste de dictionnaires), le test
+échoue silencieusement à chaque itération et la fonction retourne
+toujours \texttt{999} -- sans lever d'erreur. C'est exactement ce qui
+se produisait avant correction pour les fantômes.
+
+\subsection{\texttt{proximity\_score} -- normalisation en score}
+
+\begin{lstlisting}
+def proximity_score(
+    pos: Tuple[int, int],
+    targets: List[Tuple[int, int]],
+    walls,
+) -> float:
+    """Retourne un score de proximité normalisé."""
+    dist = bfs_distance(pos, targets, walls)
+    return 0.0 if dist >= 999 else 1.0 / (dist + 1.0)
+\end{lstlisting}
+
+Un réseau de neurones apprend mieux sur des entrées bornées et à peu près
+à la même échelle que les autres features (qui sont déjà entre 0 et 1).
+Une distance brute (0 à quelques dizaines de cases) n'est pas bornée et
+n'est pas dans la même échelle que, par exemple, un indicateur binaire de
+mur. \texttt{proximity\_score} convertit donc la distance en un score
+$\in \,]0, 1]$ via $\frac{1}{d+1}$ : plus la cible est proche, plus le
+score est élevé (1.0 quand $d=0$, la cible est sur la case), et il tend
+vers 0 quand $d$ grandit, sans jamais l'atteindre exactement (sauf le cas
+"pas de cible" $\to$ 0.0 explicitement). Le \texttt{+1} au dénominateur
+évite une division par zéro quand $d=0$.
+
+\subsection{\texttt{state\_to\_tensor} -- le c\oe{}ur du feature engineering}
+
+C'est la fonction la plus importante du fichier : elle convertit un
+\texttt{GameState} complet (position de Pacman, grille de murs, nourriture,
+capsules, fantômes...) en un vecteur \texttt{torch.Tensor} de taille fixe
+(35), qui est ce que le réseau reçoit réellement en entrée.
+
+\subsubsection{Récupération des informations brutes}
+
+\begin{lstlisting}
+pac_x, pac_y = map(int, state.getPacmanPosition())
+pacman_pos = (pac_x, pac_y)
+
+walls = state.getWalls()
+food = state.getFood().asList()
+capsules = state.getCapsules()
+ghost_states = state.getGhostStates()
+maze_width, maze_height = walls.width, walls.height
+\end{lstlisting}
+
+\begin{itemize}
+    \item \texttt{state.getPacmanPosition()} retourne des coordonnées
+    potentiellement flottantes (le moteur de jeu peut interpoler la
+    position pendant une animation) -- \texttt{map(int, ...)} force des
+    coordonnées de grille entières, cohérentes avec l'indexation de
+    \texttt{walls}.
+    \item \texttt{state.getFood()} retourne une grille booléenne ; on
+    appelle \texttt{.asList()} pour obtenir directement la liste des
+    positions \texttt{(x, y)} où il reste de la nourriture -- plus
+    pratique pour BFS que de reparcourir la grille.
+    \item \texttt{state.getCapsules()} retourne déjà une liste de
+    positions.
+    \item \texttt{state.getGhostStates()} retourne les objets fantômes
+    complets (position, direction, minuteur "apeuré").
+    \item \texttt{maze\_width, maze\_height} servent plus loin à
+    normaliser des écarts de position entre 0 et 1 environ.
+\end{itemize}
+
+\subsubsection{Séparation fantômes normaux / apeurés}
+
+\begin{lstlisting}
+normal_ghosts = []
+scared_ghosts = []
+scared_timer_sum = 0
+
+for ghost in ghost_states:
+    pos = tuple(map(int, ghost.getPosition()))
+    pos = ghost.getPosition()
+    g_info = {
+        'pos': (int(pos[0]), int(pos[1])),
+        'dir': ghost.getDirection(),
+        'scared_timer': ghost.scaredTimer
+    }
+    if ghost.scaredTimer > 0:
+        scared_ghosts.append(g_info)
+        scared_timer_sum += ghost.scaredTimer
+    else:
+        normal_ghosts.append(g_info)
+
+avg_scared_timer = (
+    scared_timer_sum / max(1, len(scared_ghosts)) / 40.0
+)
+\end{lstlisting}
+
+\textbf{Pourquoi séparer les fantômes en deux groupes ?} Un fantôme
+"apeuré" (\texttt{scaredTimer > 0}, après que Pacman a mangé une capsule)
+doit être \emph{recherché} (le manger rapporte des points et l'élimine
+temporairement), alors qu'un fantôme normal doit être \emph{évité} (il
+tue Pacman). Ce sont deux comportements opposés : mélanger les deux dans
+une seule feature de "distance au fantôme le plus proche" ferait perdre
+cette distinction cruciale au réseau. D'où deux sous-ensembles de features
+symétriques, un pour chaque catégorie.
+
+Pour chaque fantôme, on construit un dictionnaire \texttt{g\_info} avec sa
+position entière, sa direction de déplacement courante et son minuteur.
+On note une ligne redondante : \texttt{pos = tuple(map(int, ...))} est
+calculée puis immédiatement écrasée par \texttt{pos = ghost.getPosition()}
+à la ligne suivante -- la première affectation est un reliquat sans effet
+(la conversion en entiers est de toute façon refaite juste après, dans
+\texttt{g\_info}). Cela n'affecte pas le résultat mais illustre le genre
+de code laissé par erreur pendant l'itération sur le projet.
+
+\texttt{avg\_scared\_timer} calcule la moyenne du minuteur "apeuré" sur
+les fantômes actuellement apeurés (ou 0 s'il n'y en a pas, grâce au
+\texttt{max(1, ...)} qui évite une division par zéro), puis divise par 40
+pour ramener cette valeur dans un intervalle proche de $[0, 1]$ -- 40
+étant l'ordre de grandeur du minuteur maximal côté moteur de jeu. C'est
+une normalisation empirique (pas une constante du moteur exposée
+publiquement), choisie pour garder cette feature à la même échelle que
+les autres.
+
+\subsubsection{Correction appliquée -- bug des positions de fantômes}
+\label{sec:bug-ghost}
+
+\begin{lstlisting}
+scared_positions = [g['pos'] for g in scared_ghosts]
+normal_positions = [g['pos'] for g in normal_ghosts]
+\end{lstlisting}
+
+\textbf{Ce que ces deux lignes corrigent.} Plus loin dans la fonction
+(features directionnelles, section suivante), le code appelait
+\texttt{proximity\_score(next\_pos, scared\_ghosts, walls)} et
+\texttt{proximity\_score(next\_pos, normal\_ghosts, walls)} en passant
+directement les listes de \emph{dictionnaires} \texttt{scared\_ghosts} /
+\texttt{normal\_ghosts}, alors que \texttt{bfs\_distance} attend une
+liste de \emph{tuples} \texttt{(x, y)}. Le test
+\texttt{(x, y) in targets} comparait alors un tuple à des dictionnaires
+-- toujours faux, sans erreur levée -- si bien que ces deux features
+valaient \emph{systématiquement} 0.0, quelle que soit la position réelle
+des fantômes. Comme cela concernait 2 features par direction $\times$ 4
+directions, \textbf{8 des 35 features d'entrée du réseau étaient
+constamment nulles}, alors qu'elles étaient censées indiquer si se
+déplacer dans telle direction rapproche ou éloigne d'un fantôme apeuré ou
+normal -- une information directement liée à la survie de Pacman et donc
+à la capacité du réseau à bien classifier l'action experte.
+
+La correction extrait explicitement les positions
+(\texttt{[g['pos'] for g in ...]}) avant l'appel à
+\texttt{proximity\_score}, pour lui fournir le type de données qu'elle
+attend réellement. Après correction et réentraînement, la précision de
+validation est passée d'environ 90.10\,\% à 90.35\,\%, confirmant que ces
+features apportent de l'information utile une fois correctement calculées.
+
+\subsubsection{Features directionnelles (20 features)}
+
+\begin{lstlisting}
+features: List[int] = []
+
+for action in [
+    Directions.NORTH,
+    Directions.SOUTH,
+    Directions.EAST,
+    Directions.WEST,
+]:
+    dx, dy = Actions.directionToVector(action)
+    next_pos = (
+        int(pac_x + dx),
+        int(pac_y + dy)
+    )
+
+    if walls[next_pos[0]][next_pos[1]]:
+        features.extend([1.0, 0.0, 0.0, 0.0, 0.0])
+    else:
+        features.append(0.0)
+        features.append(proximity_score(next_pos, food, walls))
+        features.append(proximity_score(next_pos, capsules, walls))
+        features.append(proximity_score(next_pos, scared_positions, walls))
+        features.append(proximity_score(next_pos, normal_positions, walls))
+\end{lstlisting}
+
+Idée : pour chacune des 4 directions cardinales (STOP est volontairement
+exclu ici -- voir \texttt{PacmanDataset} ci-dessous), on simule "et si
+Pacman allait dans cette direction ?" et on décrit la case résultante
+avec 5 nombres :
+\begin{enumerate}
+    \item indicateur binaire "c'est un mur" (1.0 ou 0.0),
+    \item score de proximité à la nourriture la plus proche depuis cette
+    case,
+    \item score de proximité à la capsule la plus proche,
+    \item score de proximité au fantôme apeuré le plus proche,
+    \item score de proximité au fantôme normal le plus proche.
+\end{enumerate}
+
+\texttt{Actions.directionToVector(action)} (fourni par le moteur de jeu)
+convertit une direction symbolique en vecteur de déplacement
+\texttt{(dx, dy)}. \texttt{next\_pos} est donc la case que Pacman
+occuperait s'il choisissait cette action.
+
+Le \texttt{if walls[...]: features.extend([1.0, 0.0, 0.0, 0.0, 0.0])} est
+un raccourci important : si la case est un mur, ce déplacement est
+\emph{illégal} et les 4 scores de proximité n'ont pas de sens physique
+(on ne peut pas être "sur" une case mur) -- on les met à 0 uniformément
+plutôt que de calculer une proximité depuis une case inatteignable, ce
+qui économise aussi le calcul BFS (potentiellement coûteux) pour cette
+direction.
+
+Dans le cas contraire (\texttt{else}), on empile explicitement les 5
+valeurs (indicateur de mur à 0.0, puis les 3 -- désormais 4 après
+correction -- scores de proximité). L'ordre de ces 5 valeurs par
+direction, répété 4 fois, donne les 20 premières features du vecteur
+final ; c'est cet ordre fixe que \texttt{architecture.py} exploite ensuite
+pour découper le tenseur en "branches" (voir
+section~\ref{sec:architecture-forward}).
+
+\subsubsection{Features fantômes (10 features)}
+
+\begin{lstlisting}
+def get_closest_ghost_features(ghost_list):
+    if len(ghost_list) < 1:
+        return [0.0] * 5
+
+    closest_ghost = min(
+        ghost_list,
+        key=lambda g: bfs_distance(pacman_pos, g['pos'], walls)
+    )
+
+    dist = bfs_distance(pacman_pos, closest_ghost['pos'], walls)
+
+    proximity = 1.0 / (dist + 1.0)
+    dx = (closest_ghost['pos'][0] - pacman_pos[0]) / maze_width
+    dy = (closest_ghost['pos'][1] - pacman_pos[1]) / maze_height
+
+    vx, vy = Actions.directionToVector(closest_ghost['dir'])
+
+    return [proximity, dx, dy, vx, vy]
+
+features.extend(get_closest_ghost_features(normal_ghosts))
+features.extend(get_closest_ghost_features(scared_ghosts))
+\end{lstlisting}
+
+Cette fonction interne (\emph{closure}, elle capture \texttt{pacman\_pos},
+\texttt{walls} et \texttt{maze\_width}/\texttt{maze\_height} de la portée
+englobante) décrit le fantôme le plus proche d'une catégorie donnée avec
+5 nombres : une proximité, un vecteur de direction relative
+\texttt{(dx, dy)} normalisé par la taille du labyrinthe, et le vecteur de
+déplacement courant du fantôme \texttt{(vx, vy)} (pour donner au réseau
+une indication de la trajectoire du fantôme, pas seulement sa position
+statique -- utile pour anticiper).
+
+\begin{itemize}
+    \item Si la liste est vide (aucun fantôme de cette catégorie), on
+    retourne \texttt{[0.0]*5} -- valeur neutre, cohérente avec le reste
+    du vecteur.
+    \item \texttt{min(ghost\_list, key=lambda g: bfs\_distance(...))}
+    sélectionne le fantôme minimisant la distance BFS à Pacman.
+    \textbf{Remarque} : cela recalcule un BFS complet pour \emph{chaque}
+    fantôme de la liste rien que pour trouver le minimum, puis un
+    \emph{nouveau} BFS est relancé juste après (ligne \texttt{dist = ...})
+    pour connaître la distance exacte du gagnant -- redondant en
+    complexité (un simple \texttt{argmin} manuel en une seule passe
+    aurait suffi) mais sans impact sur la correction du résultat.
+    \item \texttt{dx}, \texttt{dy} sont les écarts de position bruts
+    (pas la distance BFS ici, mais l'écart en ligne droite), normalisés
+    par les dimensions du labyrinthe pour rester dans un intervalle
+    proche de $[-1, 1]$ -- ceci donne au réseau une information
+    \emph{directionnelle} (le fantôme est-il plutôt au Nord ? à l'Est ?)
+    complémentaire du simple scalaire de proximité.
+    \item \texttt{vx, vy} encodent le sens de déplacement actuel du
+    fantôme (typiquement des valeurs dans $\{-1, 0, 1\}$).
+\end{itemize}
+
+Cette fonction est appelée une fois pour \texttt{normal\_ghosts} et une
+fois pour \texttt{scared\_ghosts}, produisant $5 + 5 = 10$ features.
+
+\subsubsection{Features globales (5 features)}
+
+\begin{lstlisting}
+features.append(avg_scared_timer)
+features.append(len(scared_ghosts) / max(1, len(ghost_states)))
+features.append(proximity_score(pacman_pos, capsules, walls))
+features.append(
+    len(food) / state.data.layout.totalFood
+)
+features.append(1.0)  # biais
+\end{lstlisting}
+
+Cinq indicateurs de contexte global (indépendants de la direction
+choisie) :
+\begin{enumerate}
+    \item \texttt{avg\_scared\_timer} : calculé plus haut, indique
+    "combien de temps reste-t-il pour manger les fantômes apeurés ?".
+    \item proportion de fantômes actuellement apeurés parmi tous les
+    fantômes -- un contexte binaire/continu ("est-on en phase offensive
+    ou défensive ?").
+    \item \texttt{proximity\_score(pacman\_pos, capsules, walls)} :
+    proximité de Pacman \emph{lui-même} (pas d'une case candidate) à la
+    capsule la plus proche.
+    \item proportion de nourriture \emph{restante} par rapport au total
+    initial du niveau (\texttt{state.data.layout.totalFood}) -- indique
+    l'avancement de la partie.
+    \item une constante \texttt{1.0} commentée "biais". Ce n'est pas un
+    biais au sens statistique standard : chaque couche \texttt{nn.Linear}
+    de PyTorch possède \emph{déjà} un paramètre de biais appris par
+    défaut (\texttt{bias=True}), donc ajouter une entrée constante égale
+    à 1 n'apporte rien que le réseau ne pourrait déjà apprendre via ses
+    biais internes -- elle occupe simplement un emplacement du vecteur de
+    35 features sans information nouvelle.
+\end{enumerate}
+
+\subsection{\texttt{PacmanDataset} -- adaptation PyTorch}
+
+\begin{lstlisting}
+class PacmanDataset(Dataset):
+    """Dataset PyTorch pour l'imitation learning Pacman."""
+
+    def __init__(self, path: str) -> None:
+        with open(path, "rb") as file:
+            data = pickle.load(file)
+
+        self.inputs: List[torch.Tensor] = []
+        self.labels: List[int] = []
+
+        for state, action in data:
+            if action != Directions.STOP:
+                self.inputs.append(state_to_tensor(state))
+                self.labels.append(ACTION_TO_INDEX[action])
+
+    def __len__(self) -> int:
+        return len(self.inputs)
+
+    def __getitem__(self, index: int):
+        return self.inputs[index], torch.tensor(self.labels[index])
+\end{lstlisting}
+
+\texttt{PacmanDataset} hérite de \texttt{torch.utils.data.Dataset}, la
+classe abstraite que PyTorch utilise pour construire des
+\texttt{DataLoader} (batchs, mélange aléatoire, etc.). Il faut implémenter
+deux méthodes : \texttt{\_\_len\_\_} et \texttt{\_\_getitem\_\_}.
+
+\begin{itemize}
+    \item Le constructeur charge le fichier pickle (\texttt{path}) qui
+    contient une liste de paires \texttt{(GameState, action)} enregistrées
+    par l'expert.
+    \item Pour chaque paire, \textbf{si l'action n'est pas STOP}, on
+    convertit l'état en tenseur (\texttt{state\_to\_tensor}) et l'action
+    en index (\texttt{ACTION\_TO\_INDEX}), et on les stocke dans deux
+    listes parallèles \texttt{self.inputs} / \texttt{self.labels}.
+    \textbf{Pourquoi exclure STOP ?} STOP est une action "de repli" très
+    rare et peu informative dans les données d'un expert (il ne
+    représente pas une vraie décision stratégique) ; l'inclure
+    déséquilibrerait encore plus les classes et pourrait pousser le
+    réseau à apprendre à "ne rien faire" dans des situations ambiguës --
+    un comportement indésirable pour un agent qui doit activement éviter
+    un fantôme.
+    \item \texttt{\_\_len\_\_} retourne simplement le nombre d'exemples.
+    \item \texttt{\_\_getitem\_\_(index)} retourne la paire
+    \texttt{(tensor\_features, tensor\_label)} attendue par le
+    \texttt{DataLoader} -- le label est explicitement enveloppé dans un
+    \texttt{torch.tensor(...)} scalaire (requis par
+    \texttt{nn.CrossEntropyLoss}, qui attend des labels sous forme
+    d'entiers \texttt{LongTensor}).
+\end{itemize}
+
+\newpage
+\section{\texttt{architecture.py} -- le réseau \texttt{PacmanNetwork}}
+
+\subsection{Choix architectural : réseau multi-branches à fusion tardive}
+\label{sec:architecture-forward}
+
+\begin{lstlisting}
+class PacmanNetwork(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+        self.direction_branch = nn.Sequential(
+            nn.Linear(20, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, 64),
+            nn.LeakyReLU(),
+        )
+
+        self.ghost_branch = nn.Sequential(
+            nn.Linear(10, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, 32),
+            nn.LeakyReLU(),
+        )
+
+        self.global_branch = nn.Sequential(
+            nn.Linear(5, 32),
+            nn.LeakyReLU(),
+        )
+
+        self.decision_head = nn.Sequential(
+            nn.Linear(64 + 32 + 32, 64),
+            nn.LeakyReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(64, 5),
+        )
+\end{lstlisting}
+
+Plutôt qu'un simple \emph{Multi-Layer Perceptron} (MLP) qui concatènerait
+les 35 features en entrée d'une seule pile de couches denses, le réseau
+adopte une architecture \textbf{multi-branches à fusion tardive}
+(\emph{late fusion}) : les trois groupes de features définis dans
+\texttt{state\_to\_tensor} (directionnelles, fantômes, globales) sont
+traités par des sous-réseaux \emph{séparés} avant d'être combinés.
+
+\textbf{Justification.} Ces trois groupes ont des sémantiques différentes
+(20 nombres décrivant 4 directions candidates, 10 nombres décrivant les
+deux fantômes les plus proches, 5 nombres de contexte global) et
+n'ont pas de raison d'être mélangés dès la première couche : forcer un
+mélange linéaire immédiat de features hétérogènes (par exemple un
+indicateur de mur avec un vecteur de vitesse de fantôme) peut rendre
+l'apprentissage plus difficile, car chaque neurone de la première couche
+doit alors apprendre à isoler lui-même la structure de chaque groupe. En
+laissant chaque branche extraire d'abord ses propres représentations
+intermédiaires, puis en les concaténant (\texttt{fusion tardive}) avant la
+tête de décision commune, le réseau peut apprendre des transformations
+spécifiques à chaque type d'information avant de les combiner pour la
+décision finale.
+
+\begin{itemize}
+    \item \texttt{direction\_branch} (20 $\to$ 64 $\to$ 64) : la branche
+    la plus large en entrée (20 features) reçoit deux couches
+    \texttt{Linear} pour lui donner assez de capacité à extraire des
+    motifs dans les 4 sous-groupes de 5 features directionnelles.
+    \item \texttt{ghost\_branch} (10 $\to$ 64 $\to$ 32) : réduit
+    progressivement la dimension (64 puis 32), les features fantômes
+    étant plus compactes (10 valeurs) mais denses en information
+    (position relative + vitesse de 2 fantômes).
+    \item \texttt{global\_branch} (5 $\to$ 32) : une seule couche suffit,
+    vu la faible dimensionnalité d'entrée (5 features de contexte).
+    \item \texttt{decision\_head} : reçoit la concaténation des trois
+    sorties ($64 + 32 + 32 = 128$ neurones), passe par une couche
+    \texttt{Linear(128, 64)} puis \texttt{Dropout(0.1)} (régularisation,
+    voir plus bas) avant la couche finale \texttt{Linear(64, 5)} qui
+    produit les 5 scores (\emph{logits}) correspondant aux 5 actions
+    possibles (NORTH, SOUTH, EAST, WEST, STOP).
+\end{itemize}
+
+\texttt{nn.LeakyReLU()} est utilisée comme fonction d'activation plutôt
+que le classique \texttt{nn.ReLU()}. \texttt{ReLU} annule complètement
+tout signal négatif ($f(x) = \max(0, x)$), ce qui peut conduire au
+phénomène de "neurones morts" (un neurone dont l'entrée est toujours
+négative ne produit plus jamais de gradient et cesse d'apprendre).
+\texttt{LeakyReLU} laisse passer une petite pente pour les valeurs
+négatives ($f(x) = x$ si $x>0$, sinon $f(x) = \alpha x$ avec un $\alpha$
+petit, par défaut $0.01$ dans PyTorch), ce qui garde un gradient non nul
+partout et rend l'entraînement plus robuste, en particulier avec un
+réseau relativement petit comme celui-ci où perdre des neurones a un
+impact proportionnellement plus grand.
+
+\subsubsection{Simplification appliquée -- dropout à 0.05 retiré}
+\label{sec:artifice-dropout}
+
+La branche \texttt{direction\_branch} contenait initialement un
+\texttt{nn.Dropout(0.05)} entre ses deux couches \texttt{Linear}. Un taux
+de 5\,\% désactive en moyenne seulement 1 neurone sur 20 à chaque passe
+d'entraînement -- un effet de régularisation quasiment négligeable -- et
+il n'était pas cohérent avec le reste du réseau : \texttt{ghost\_branch}
+et \texttt{global\_branch} n'ont aucun dropout, et \texttt{decision\_head}
+utilise un taux dix fois plus élevé (\texttt{Dropout(0.1)}), sans
+justification apparente à cette différence d'ordre de grandeur entre
+branches. Cette incohérence -- une pièce de code présente mais dont
+l'effet réel est quasi nul -- a été supprimée : la régularisation du
+\texttt{Dropout(0.1)} en toute fin de réseau, juste avant la couche de
+sortie, suffit à limiter le sur-apprentissage sans complexifier
+inutilement chaque branche.
+
+\subsubsection{Simplification appliquée -- initialisation de poids custom retirée}
+\label{sec:artifice-init}
+
+Le code contenait initialement :
+\begin{lstlisting}
+self.apply(self._init_weights)
+
+def _init_weights(self, m):
+    if isinstance(m, nn.Linear):
+        nn.init.kaiming_normal_(
+            m.weight, mode='fan_out', nonlinearity='leaky_relu'
+        )
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+\end{lstlisting}
+
+\texttt{self.apply(fn)} applique récursivement \texttt{fn} à tous les
+sous-modules du réseau. Ici, \texttt{\_init\_weights} remplaçait
+l'initialisation par défaut de \emph{toutes} les couches
+\texttt{nn.Linear} par une initialisation de Kaiming (adaptée aux
+activations de type ReLU/LeakyReLU, en tenant compte du nombre de
+connexions sortantes via \texttt{mode='fan\_out'}), et mettait les biais
+à 0.
+
+Le problème : cette initialisation était appliquée \textbf{uniformément},
+y compris à la toute dernière couche du réseau
+(\texttt{decision\_head}'s \texttt{nn.Linear(64, 5)}), qui produit des
+\emph{logits bruts} directement passés à \texttt{nn.CrossEntropyLoss}
+-- il n'y a \emph{aucune} activation \texttt{LeakyReLU} après cette
+couche. L'hypothèse \texttt{nonlinearity='leaky\_relu'} passée à
+\texttt{kaiming\_normal\_} n'a donc pas de sens pour cette couche
+spécifique : c'est un morceau de code qui a l'air rigoureux
+("initialisation adaptée à l'activation") mais qui ne l'est en réalité
+pas partout où il s'applique. PyTorch initialise déjà par défaut les
+couches \texttt{nn.Linear} avec une distribution de Kaiming-uniforme
+(bornes basées sur le nombre d'entrées), qui est un choix standard et
+suffisant pour ce réseau ; ce bloc de code a donc été retiré. La
+comparaison empirique avant/après n'a montré aucune dégradation de la
+précision de validation.
+
+\subsection{\texttt{forward} -- passe avant}
+
+\begin{lstlisting}
+def forward(self, x: torch.Tensor) -> torch.Tensor:
+    dir_features = x[:, :20]
+    ghost_features = x[:, 20:30]
+    global_features = x[:, 30:]
+
+    dir_out = self.direction_branch(dir_features)
+    ghost_out = self.ghost_branch(ghost_features)
+    global_out = self.global_branch(global_features)
+
+    fused = torch.cat([dir_out, ghost_out, global_out], dim=1)
+    return self.decision_head(fused)
+\end{lstlisting}
+
+\texttt{x} est un batch de forme \texttt{(N, 35)} ($N$ exemples, 35
+features chacun, produits par \texttt{state\_to\_tensor}). Le
+\textbf{découpage par indices} (\texttt{x[:, :20]},
+\texttt{x[:, 20:30]}, \texttt{x[:, 30:]}) reproduit exactement l'ordre
+dans lequel les features ont été empilées dans \texttt{state\_to\_tensor}
+: les 20 premières sont les 4 blocs directionnels de 5 valeurs, les 10
+suivantes les deux blocs "fantôme le plus proche" (normal puis apeuré),
+les 5 dernières les features globales. \textbf{Ce couplage implicite
+entre l'ordre de construction du vecteur dans \texttt{data.py} et le
+découpage dans \texttt{architecture.py} est une dépendance fragile}: si
+l'ordre des features change dans l'un des deux fichiers sans changer
+l'autre en conséquence, le réseau recevrait des données silencieusement
+incohérentes (aucune erreur ne serait levée, seule la précision
+s'effondrerait).
+
+Chaque branche transforme son sous-vecteur en une représentation
+intermédiaire (\texttt{dir\_out}: 64, \texttt{ghost\_out}: 32,
+\texttt{global\_out}: 32). \texttt{torch.cat([...], dim=1)} les concatène
+le long de la dimension des features (dim 1, la dimension 0 étant celle
+du batch), produisant un vecteur de 128 valeurs par exemple -- c'est la
+"fusion tardive". Ce vecteur fusionné est enfin passé à
+\texttt{decision\_head}, qui retourne les 5 logits finaux, de forme
+\texttt{(N, 5)}.
+
+\newpage
+\section{\texttt{train.py} -- la boucle d'entraînement}
+
+\subsection{Reproductibilité -- \texttt{set\_seed}}
+
+\begin{lstlisting}
+def set_seed(seed=42):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+
+set_seed(50)
+\end{lstlisting}
+
+L'entraînement d'un réseau de neurones dépend de nombreuses sources
+d'aléatoire : initialisation des poids, ordre de mélange des données
+(\texttt{shuffle=True} du \texttt{DataLoader}), split train/validation.
+Fixer toutes les graines aléatoires (PyTorch CPU, PyTorch GPU, NumPy,
+\texttt{random} natif de Python) rend les résultats
+\textbf{reproductibles} d'une exécution à l'autre -- indispensable pour
+comparer objectivement deux versions du code (par exemple avant/après une
+correction de bug) sans que la différence observée puisse être due au
+hasard plutôt qu'au changement lui-même.
+\texttt{torch.backends.cudnn.deterministic = True} désactive certaines
+optimisations non déterministes du GPU (cuDNN peut choisir des
+algorithmes différents selon le matériel), au prix d'une performance
+potentiellement légèrement inférieure sur GPU, en échange de la
+reproductibilité stricte. La graine utilisée dans ce projet est 50
+(passée explicitement à l'appel, la valeur \texttt{42} du paramètre par
+défaut n'étant donc jamais utilisée ici).
+
+\subsection{\texttt{Pipeline.\_\_init\_\_} -- préparation de l'entraînement}
+
+\begin{lstlisting}
+class Pipeline(nn.Module):
+    def __init__(self, path, model_save_path="pacman_model.pth"):
+        super().__init__()
+        self.model_save_path = model_save_path
+        full_dataset = PacmanDataset(path)
+        train_size = int(0.80 * len(full_dataset))
+        val_size = len(full_dataset) - train_size
+        self.train_dataset, self.val_dataset = random_split(
+            full_dataset, [train_size, val_size]
+        )
+\end{lstlisting}
+
+\texttt{Pipeline} hérite (par commodité, pas par nécessité stricte) de
+\texttt{nn.Module}, bien qu'il ne définisse pas lui-même de couches --
+cela permet notamment d'utiliser \texttt{self.model} comme sous-module
+enregistré si besoin.
+
+Le \texttt{Dataset} complet (obtenu via \texttt{PacmanDataset(path)}, qui
+applique tout le pipeline \texttt{state\_to\_tensor} décrit
+précédemment) est ensuite découpé en un jeu d'\textbf{entraînement} (80\,\%)
+et un jeu de \textbf{validation} (20\,\%) via
+\texttt{torch.utils.data.random\_split}. \textbf{Pourquoi ce split ?} Sans
+lui, on ne pourrait mesurer la performance du modèle que sur les données
+mêmes qu'il a apprises par c\oe{}ur, ce qui ne dit rien de sa capacité à
+généraliser à de nouveaux états de jeu (typiquement ceux du jeu de test
+\texttt{pacman\_test.pkl}, jamais vus pendant l'entraînement). Le split
+80/20 est un compromis standard entre donner suffisamment de données au
+modèle pour apprendre et garder un échantillon de validation
+statistiquement représentatif pour détecter le sur-apprentissage.
+\texttt{random\_split} effectue ce découpage aléatoirement (grâce à la
+graine fixée plus haut, ce découpage est reproductible), ce qui évite tout
+biais lié à l'ordre dans lequel les exemples ont été enregistrés dans le
+fichier pickle d'origine.
+
+\begin{lstlisting}
+        labels = [label for _, label in full_dataset]
+        counts = Counter(labels)
+        total = sum(counts.values())
+
+        weights = []
+        for i in range(5):
+            freq = counts.get(i, 1)
+            weights.append(total / freq)
+
+        class_weights = torch.tensor(weights, dtype=torch.float32)
+\end{lstlisting}
+
+Cette section calcule des \textbf{poids de classes} pour compenser un
+\textbf{déséquilibre} entre les actions dans le jeu de données -- par
+exemple, l'expert va probablement beaucoup plus souvent tout droit ou
+vers la nourriture la plus proche que dans une direction rare. Sans
+correction, le modèle serait incité à privilégier systématiquement les
+classes majoritaires pour minimiser la perte moyenne, au détriment des
+classes rares (potentiellement des actions d'évitement de fantôme,
+cruciales bien que rares).
+
+\begin{itemize}
+    \item \texttt{labels = [label for \_, label in full\_dataset]}
+    parcourt \emph{tout} le \texttt{Dataset} (donc appelle
+    \texttt{\_\_getitem\_\_} pour chaque exemple) pour récupérer la
+    liste de tous les labels.
+    \item \texttt{Counter(labels)} compte les occurrences de chaque
+    classe (0 à 4).
+    \item Pour chaque classe \texttt{i} de 0 à 4, on calcule un poids
+    \texttt{total / freq} : plus une classe est rare (\texttt{freq}
+    petit), plus son poids est grand -- une erreur sur un exemple rare
+    coûtera donc proportionnellement plus cher dans la fonction de perte.
+    \texttt{counts.get(i, 1)} utilise \texttt{1} comme valeur par défaut
+    si une classe n'apparaît jamais dans le jeu de données (évite une
+    division par zéro ; en pratique cela concernerait surtout la classe
+    STOP -- index 4 -- qui est explicitement exclue du \texttt{Dataset}
+    par \texttt{PacmanDataset}, donc \texttt{counts.get(4, 1)} vaudra
+    quasi systématiquement 1, produisant un poids délibérément très
+    élevé pour une classe qui, de toute façon, n'apparaîtra jamais dans
+    les labels réels d'entraînement -- ce poids n'a donc aucun effet
+    pratique).
+    \item Ces poids sont convertis en \texttt{torch.tensor} pour être
+    passés à \texttt{nn.CrossEntropyLoss}.
+\end{itemize}
+
+\begin{lstlisting}
+        self.model = PacmanNetwork()
+        self.criterion = nn.CrossEntropyLoss(
+            weight=class_weights,
+            label_smoothing=0.01
+        )
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(),
+            lr=0.0007
+        )
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode='min', factor=0.5, patience=10, verbose=True
+        )
+\end{lstlisting}
+
+\begin{itemize}
+    \item \texttt{nn.CrossEntropyLoss} est la fonction de perte standard
+    pour une classification multi-classes avec logits en sortie (elle
+    applique elle-même un \texttt{softmax} implicite puis une
+    log-vraisemblance négative). Le paramètre \texttt{weight} lui passe
+    les poids de classes calculés ci-dessus.
+    \texttt{label\_smoothing=0.01} adoucit légèrement les labels cibles
+    (au lieu d'une cible "one-hot" stricte à 100\,\% sur la bonne classe,
+    on vise par exemple 99\,\% sur la bonne classe et le reste réparti
+    sur les autres) -- cela limite la sur-confiance du modèle et améliore
+    généralement la généralisation, au prix d'un effet très léger vu la
+    faible valeur choisie (1\,\%).
+    \item \texttt{torch.optim.Adam} est l'optimiseur choisi, avec un
+    taux d'apprentissage \texttt{lr=0.0007} -- Adam est un choix par
+    défaut robuste (il adapte le taux d'apprentissage par paramètre),
+    approprié pour un réseau de cette taille sans nécessiter un réglage
+    fin extensif.
+    \item \texttt{ReduceLROnPlateau} est un \emph{scheduler} qui réduit
+    le taux d'apprentissage quand une métrique surveillée (ici
+    \texttt{mode='min'} sur la perte de validation, passée via
+    \texttt{self.scheduler.step(val\_loss)} dans la boucle
+    d'entraînement) cesse de s'améliorer pendant \texttt{patience=10}
+    époques consécutives ; il multiplie alors le taux d'apprentissage
+    par \texttt{factor=0.5} (le divise par 2). Cela permet de démarrer
+    avec un taux d'apprentissage relativement élevé pour progresser vite,
+    puis de l'affiner automatiquement quand l'entraînement stagne, sans
+    intervention manuelle.
+\end{itemize}
+
+\subsection{\texttt{train} -- boucle d'apprentissage}
+
+\begin{lstlisting}
+def train(self, epochs=300, batch_size=64, patience=25):
+    train_loader = DataLoader(
+        self.train_dataset, batch_size=batch_size, shuffle=True
+    )
+    val_loader = DataLoader(
+        self.val_dataset, batch_size=batch_size, shuffle=False
+    )
+
+    best_loss = float('inf')
+    best_acc = 0.0
+    patience_counter = 0
+    for epoch in range(epochs):
+        self.model.train()
+        ...
+\end{lstlisting}
+
+\begin{itemize}
+    \item \texttt{epochs=300} : nombre maximal d'époques (un passage
+    complet sur le jeu d'entraînement), avec arrêt anticipé possible
+    (voir \texttt{patience} ci-dessous).
+    \item \texttt{batch\_size=64} : nombre d'exemples traités
+    simultanément avant chaque mise à jour des poids -- un compromis
+    entre stabilité du gradient (plus grand = plus stable mais plus lent
+    à converger en nombre d'itérations) et vitesse de calcul.
+    \item \texttt{patience=25} (paramètre de la méthode \texttt{train},
+    distinct du \texttt{patience=10} du \emph{scheduler}) : nombre
+    d'époques sans amélioration de \texttt{val\_acc} toléré avant
+    d'arrêter l'entraînement (\emph{early stopping}).
+    \item \texttt{train\_loader} mélange les données à chaque époque
+    (\texttt{shuffle=True}) pour éviter que le modèle n'apprenne un ordre
+    particulier ; \texttt{val\_loader} ne mélange pas
+    (\texttt{shuffle=False}), ce qui n'a pas d'importance pour l'évaluation
+    mais évite un coût de mélange inutile.
+    \item \texttt{best\_loss = float('inf')} et \texttt{best\_acc = 0.0}
+    initialisent les meilleures valeurs observées à des bornes triviales
+    (toute perte réelle sera inférieure à l'infini, toute accuracy réelle
+    sera supérieure à 0), garantissant que la première époque sera
+    toujours considérée comme une amélioration.
+\end{itemize}
+
+\begin{lstlisting}
+        for inputs, labels in train_loader:
+            self.optimizer.zero_grad()
+            outputs = self.model(inputs)
+            loss = self.criterion(outputs, labels)
+            loss.backward()
+            self.optimizer.step()
+
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+\end{lstlisting}
+
+C'est la boucle d'entraînement standard PyTorch, batch par batch :
+\begin{enumerate}
+    \item \texttt{optimizer.zero\_grad()} : remet à zéro les gradients
+    accumulés du batch précédent (PyTorch accumule les gradients par
+    défaut, il faut donc explicitement les réinitialiser à chaque
+    itération).
+    \item \texttt{outputs = self.model(inputs)} : passe avant, produit
+    les logits \texttt{(batch\_size, 5)}.
+    \item \texttt{loss = self.criterion(outputs, labels)} : calcule la
+    perte moyenne du batch (pondérée par classe, voir plus haut).
+    \item \texttt{loss.backward()} : rétropropagation, calcule les
+    gradients de la perte par rapport à chaque paramètre du réseau.
+    \item \texttt{optimizer.step()} : met à jour les poids selon la
+    règle d'Adam et les gradients calculés.
+    \item Les 4 dernières lignes accumulent les statistiques
+    (\texttt{total\_loss}, nombre de prédictions correctes
+    \texttt{correct}, nombre total d'exemples \texttt{total}) pour
+    calculer la perte et l'accuracy moyennes de l'époque.
+    \texttt{torch.max(outputs.data, 1)} retourne, pour chaque exemple du
+    batch, l'indice du logit maximal (dimension 1 = dimension des
+    classes) -- c'est la prédiction "brute" du modèle, \emph{sans} tenir
+    compte de la légalité des actions (ce filtrage n'intervient que côté
+    agent, voir \texttt{pacmanagent.py}).
+\end{enumerate}
+
+\begin{lstlisting}
+        train_acc = 100 * correct / total
+        avg_loss = total_loss / len(train_loader)
+        val_acc, val_loss = self.evaluate(val_loader)
+
+        info = f"Epoch [{epoch+1}/{epochs}] | Train Loss: {avg_loss:.4f}"
+        info += f" | Val Loss: {val_loss:.4f} "
+        info += f" | Train Acc: {train_acc:.2f}% | Val Acc: {val_acc:.2f}%"
+        print(info)
+\end{lstlisting}
+
+À la fin de chaque époque, on calcule l'accuracy et la perte moyenne
+d'entraînement, on évalue le modèle sur le jeu de validation via
+\texttt{self.evaluate(val\_loader)} (voir plus bas), et on affiche un
+résumé lisible de la progression.
+
+\subsubsection{Correction appliquée -- critère de sauvegarde simplifié}
+\label{sec:artifice-save}
+
+Le code contenait initialement :
+\begin{lstlisting}
+if val_acc - best_acc >= 0.001 \
+        and abs(val_loss - best_loss) >= 0.0001:
+    best_loss = val_loss
+    best_acc = val_acc
+    patience_counter = 0
+    torch.save(self.model.state_dict(), self.model_save_path)
+else:
+    patience_counter += 1
+\end{lstlisting}
+
+Cette condition combinait \textbf{deux seuils numériques arbitraires}
+(0.001 sur l'écart d'accuracy, 0.0001 sur l'écart de perte) par un
+\texttt{and}, avec un \texttt{abs()} qui acceptait n'importe quel
+changement de la perte de validation -- y compris une
+\emph{dégradation} -- du moment qu'il dépassait 0.0001 en valeur
+absolue. Cette double condition ne correspond à aucune règle de décision
+claire ("le meilleur modèle est celui qui a la meilleure accuracy", ou
+alternativement "la plus petite perte") : dans le pire cas, un modèle
+dont l'accuracy de validation s'améliore réellement pouvait \textbf{ne
+pas être sauvegardé} simplement parce que la perte de validation restait
+quasiment stable (écart $< 0.0001$) à cette époque précise -- perdant
+ainsi potentiellement le meilleur point de contrôle observé pendant tout
+l'entraînement.
+
+Le code final utilise un critère unique et explicite : sauvegarder dès
+que \texttt{val\_acc} dépasse le meilleur score observé jusqu'ici.
+
+\begin{lstlisting}
+if val_acc > best_acc:
+    best_acc = val_acc
+    best_loss = val_loss
+    patience_counter = 0
+    torch.save(self.model.state_dict(), self.model_save_path)
+    print(f"Enregistrement avec: {best_acc:.2f}% {best_loss:.4f}")
+else:
+    patience_counter += 1
+
+self.scheduler.step(val_loss)
+
+if patience_counter >= patience:
+    print(f"Early Stopping à l'époque {epoch+1}")
+    break
+\end{lstlisting}
+
+L'accuracy de validation est la métrique directement liée à la note du
+projet (75\,\% basés sur l'accuracy sur le jeu de test privé) : c'est
+donc le critère le plus pertinent pour décider quel \emph{checkpoint}
+conserver. \texttt{patience\_counter} est réinitialisé à chaque
+amélioration, et incrémenté sinon ; s'il atteint \texttt{patience} (25),
+l'entraînement s'arrête avant la 300\textsuperscript{e} époque -- un \emph{early
+stopping} classique pour éviter de sur-entraîner inutilement une fois que
+le modèle a cessé de progresser sur la validation.
+\texttt{self.scheduler.step(val\_loss)} est appelé à chaque époque
+(indépendamment de la sauvegarde) pour laisser le \emph{scheduler}
+surveiller la perte de validation sur la durée et réduire le taux
+d'apprentissage si besoin, comme décrit plus haut.
+
+\subsection{\texttt{evaluate} -- évaluation sans gradient}
+
+\begin{lstlisting}
+def evaluate(self, loader):
+    self.model.eval()
+    correct = 0
+    total_loss = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, labels in loader:
+            outputs = self.model(inputs)
+            loss = self.criterion(outputs, labels)
+            total_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    return 100 * correct / total, total_loss / len(loader)
+\end{lstlisting}
+
+\texttt{self.model.eval()} bascule le réseau en mode évaluation : cela
+désactive le \texttt{Dropout} (toutes les unités sont actives,
+contrairement à l'entraînement où certaines sont aléatoirement coupées)
+-- on veut évaluer le modèle dans sa configuration complète et
+déterministe, pas une version partiellement "éteinte".
+\texttt{torch.no\_grad()} désactive le calcul et le stockage des
+gradients pour tout le bloc : comme on ne fait pas de rétropropagation
+ici, cela économise mémoire et temps de calcul. Le reste de la logique
+(accumulation de la perte et du nombre de bonnes prédictions) est
+identique à la boucle d'entraînement, sans les étapes
+\texttt{zero\_grad}/\texttt{backward}/\texttt{step} qui n'ont de sens que
+pendant l'apprentissage. La fonction retourne le couple
+\texttt{(accuracy \%, perte moyenne)}.
+
+\subsection{Point d'entrée}
+
+\begin{lstlisting}
+if __name__ == "__main__":
+    pipeline = Pipeline(path="datasets/pacman_dataset.pkl")
+    pipeline.train()
+\end{lstlisting}
+
+Le \texttt{if \_\_name\_\_ == "\_\_main\_\_"} garantit que ce bloc ne
+s'exécute que si \texttt{train.py} est lancé directement (\texttt{python
+train.py}), pas s'il est importé comme module par un autre script (par
+exemple s'il fallait un jour réutiliser \texttt{Pipeline} ailleurs). On
+instancie le pipeline sur le jeu de données fourni et on lance
+l'entraînement avec les hyperparamètres par défaut de \texttt{train()}.
+
+\newpage
+\section{\texttt{pacmanagent.py} -- l'agent de jeu}
+
+\begin{lstlisting}
+class PacmanAgent(Agent):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self.model.eval()
+\end{lstlisting}
+
+\texttt{PacmanAgent} hérite de \texttt{Agent}, la classe de base du
+moteur de jeu (\texttt{pacman\_module.game.Agent}) que le moteur attend
+pour piloter Pacman -- il doit exposer une méthode \texttt{get\_action}
+(voir plus bas), appelée par le moteur à chaque tour de jeu.
+L'agent encapsule un \texttt{PacmanNetwork} déjà entraîné (\texttt{model},
+passé au constructeur plutôt que recréé ici, pour que le même agent
+puisse être réutilisé aussi bien dans \texttt{run.py} que dans
+\texttt{write\_submission.py} avec un modèle chargé différemment).
+\texttt{self.model.eval()} est appelé immédiatement pour garantir que le
+\texttt{Dropout} est désactivé pendant l'inférence -- comme pour
+\texttt{evaluate()} dans \texttt{train.py}, on veut un comportement
+déterministe et complet du réseau, pas une version partiellement coupée.
+
+\begin{lstlisting}
+    def get_action(self, state: GameState):
+        legal_actions = state.getLegalActions()
+        x = state_to_tensor(state)
+        x = x.unsqueeze(0)
+        with torch.no_grad():
+            logits = self.model(x)
+
+        best_action = Directions.STOP
+        best_score = -float('inf')
+        for idx in range(5):
+            action_candidate = INDEX_TO_ACTION_MAP[idx]
+            if action_candidate in legal_actions:
+                score = logits[0][idx].item()
+                if score > best_score:
+                    best_score = score
+                    best_action = action_candidate
+        return best_action
+\end{lstlisting}
+
+C'est la méthode appelée par le moteur de jeu à chaque tour pour demander
+une décision à Pacman.
+
+\begin{itemize}
+    \item \texttt{state.getLegalActions()} récupère, depuis le moteur de
+    jeu, la liste des actions réellement jouables depuis la position
+    actuelle (par exemple, on ne peut pas aller vers un mur). C'est une
+    information que le réseau \emph{ne connaît pas} directement -- il
+    produit un score pour les 5 actions sans savoir lesquelles sont
+    autorisées dans l'état courant.
+    \item \texttt{x = state\_to\_tensor(state)} réutilise exactement la
+    même fonction d'extraction de features que pour l'entraînement --
+    condition indispensable pour que le modèle entraîné se comporte de
+    façon cohérente en inférence (même distribution de features en
+    entrée).
+    \item \texttt{x.unsqueeze(0)} ajoute une dimension de batch : le
+    réseau attend toujours un tenseur \texttt{(N, 35)}, même pour une
+    seule prédiction (\texttt{N=1}) -- \texttt{unsqueeze(0)} transforme
+    la forme \texttt{(35,)} en \texttt{(1, 35)}.
+    \item \texttt{torch.no\_grad()} : comme pour \texttt{evaluate()},
+    aucune rétropropagation n'est nécessaire pendant le jeu, donc pas
+    besoin de calculer/stocker des gradients.
+    \item \texttt{logits = self.model(x)} donne un tenseur de forme
+    \texttt{(1, 5)}, les scores bruts (non normalisés en probabilités)
+    pour chacune des 5 actions.
+    \item La boucle \texttt{for idx in range(5)} parcourt les 5 sorties
+    possibles du réseau et, \textbf{parmi celles qui correspondent à une
+    action légale} (\texttt{if action\_candidate in legal\_actions}),
+    retient celle de score maximal -- un \emph{argmax contraint}. C'est
+    une étape essentielle : sans ce filtrage, le réseau pourrait choisir
+    l'action de score le plus élevé dans l'absolu mais qui se trouve être
+    un mur, ce qui ferait planter ou bloquer la partie.
+    \item Si aucune action légale n'était trouvée (cas normalement
+    impossible puisque le moteur garantit toujours au moins une action
+    légale), \texttt{best\_action} resterait à sa valeur initiale
+    \texttt{Directions.STOP} -- une valeur de repli sûre.
+\end{itemize}
+
+\newpage
+\section{\texttt{run.py} et \texttt{write\_submission.py} -- utilisation du modèle}
+
+\subsection{\texttt{run.py} -- visualisation d'une partie}
+
+\begin{lstlisting}
+set_seed(50)
+
+pacman_model = "pacman_model.pth"
+model = PacmanNetwork()
+
+if os.path.exists(pacman_model):
+    model.load_state_dict(torch.load(pacman_model, map_location="cpu"))
+    print("Modèle chargé avec succès.")
+else:
+    print("Erreur : pacman_model.pth introuvable. Lancez train.py d'abord.")
+
+model.eval()
+pacman_agent = PacmanAgent(model)
+
+score, elapsed_time, nodes = runGame(
+    layout_name="test_layout",
+    pacman=pacman_agent,
+    ghosts=[SmartyGhost(1)],
+    beliefstateagent=None,
+    displayGraphics=True,
+    expout=0.0,
+    hiddenGhosts=False,
+)
+
+print(f"Score: {score}")
+print(f"Computation time: {elapsed_time}")
+\end{lstlisting}
+
+Ce script sert uniquement à \textbf{visualiser} une partie jouée par
+l'agent entraîné, pour un contrôle qualité humain (le score obtenu ici
+\emph{ne reflète pas} le score de classement, qui est basé sur
+l'accuracy des prédictions, comme précisé dans l'énoncé).
+
+\begin{itemize}
+    \item Une nouvelle instance de \texttt{PacmanNetwork} est créée
+    (poids aléatoires par défaut), puis \texttt{load\_state\_dict}
+    charge les poids sauvegardés par \texttt{train.py} dans
+    \texttt{pacman\_model.pth}. \texttt{map\_location="cpu"} force le
+    chargement sur CPU même si le modèle avait été entraîné sur GPU,
+    pour la portabilité (garantit que le script fonctionne même sans
+    GPU disponible).
+    \item Une vérification défensive (\texttt{os.path.exists}) affiche un
+    message d'erreur clair si le fichier de poids n'existe pas, plutôt
+    que de laisser \texttt{torch.load} lever une exception peu explicite.
+    \item \texttt{model.eval()} et l'encapsulation dans
+    \texttt{PacmanAgent} suivent exactement le même schéma que décrit
+    précédemment.
+    \item \texttt{runGame(...)}, fournie par le moteur de jeu, lance
+    effectivement une partie : \texttt{layout\_name="test\_layout"}
+    charge le plan de niveau \texttt{test\_layout.lay},
+    \texttt{ghosts=[SmartyGhost(1)]} utilise un unique fantôme
+    "intelligent" fourni par le moteur (paramètre \texttt{1} = niveau de
+    difficulté/vitesse du fantôme), \texttt{displayGraphics=True} ouvre
+    une fenêtre graphique pour observer la partie en direct.
+    \item Le score final et le temps de calcul sont affichés en fin de
+    partie.
+\end{itemize}
+
+\subsection{\texttt{write\_submission.py} -- génération de la soumission}
+
+\begin{lstlisting}
+class SubmissionWriter:
+    def __init__(self, test_set_path, model_path):
+        with open(test_set_path, "rb") as f:
+            self.test_set = pickle.load(f)
+
+        self.model = PacmanNetwork()
+        self.model.load_state_dict(torch.load(model_path, map_location="cpu"))
+        self.model.eval()
+
+    def predict_on_testset(self):
+        actions = []
+        agent = PacmanAgent(self.model)
+        for state in self.test_set:
+            best_action = agent.get_action(state)
+            actions.append(best_action)
+        return actions
+\end{lstlisting}
+
+Ce script (dont la structure générale -- classe \texttt{SubmissionWriter}
+et méthode \texttt{write\_csv} -- était fournie par l'énoncé, seule la
+logique de prédiction a été complétée par l'équipe) génère le fichier
+\texttt{submission.csv} attendu par Gradescope.
+
+\begin{itemize}
+    \item Le constructeur charge le jeu de test (une liste de
+    \texttt{GameState} \emph{sans} action associée, contrairement au jeu
+    d'entraînement) et le modèle entraîné, de la même façon que
+    \texttt{run.py}.
+    \item \texttt{predict\_on\_testset} instancie un \texttt{PacmanAgent}
+    autour du modèle chargé, puis \textbf{réutilise directement
+    \texttt{agent.get\_action(state)}} pour chaque état du jeu de test --
+    exactement la même logique de décision (extraction de features +
+    filtrage sur actions légales) que celle utilisée en jeu réel, ce qui
+    garantit la cohérence entre le comportement de l'agent visualisé
+    dans \texttt{run.py} et les prédictions soumises pour notation.
+    \item \textbf{Point d'attention} : l'ordre des prédictions dans
+    \texttt{actions} suit l'ordre d'itération sur
+    \texttt{self.test\_set}, qui est lui-même l'ordre du fichier pickle
+    d'origine -- condition explicitement requise par l'énoncé
+    ("Your predicted actions should follow the same order as the test
+    set provided"), respectée ici simplement en ne réordonnant jamais
+    la liste.
+\end{itemize}
+
+\texttt{write\_csv} (non modifiée, fournie telle quelle par l'énoncé)
+construit un \texttt{pandas.DataFrame} à une colonne \texttt{ACTION} et
+l'écrit au format CSV sans colonne d'index
+(\texttt{index=False}), au format attendu par l'outil de correction
+automatique.
+
+\newpage
+\section{Bilan et limites}
+
+\subsection{Différences avec la version soumise en décembre 2025}
+
+Le code déposé pour ce rendu diffère de la version soumise en décembre
+2025 sur exactement trois points, tous dans des fichiers écrits par
+l'équipe (aucun changement de features, d'architecture globale ou
+d'hyperparamètres au-delà de ces trois corrections) :
+
+\begin{itemize}
+    \item \textbf{Bug fonctionnel corrigé (\texttt{data.py})} : les
+    proximités aux fantômes apeurés/normaux dans les features
+    directionnelles étaient toujours nulles à cause d'un mauvais type
+    passé à \texttt{proximity\_score} (liste de dictionnaires au lieu de
+    liste de positions, voir section~\ref{sec:bug-ghost}). Corrigé en
+    extrayant explicitement les positions avant l'appel -- gain
+    d'accuracy de validation d'environ 90.10\,\% à 90.35\,\% sur un
+    entraînement identique par ailleurs.
+    \item \textbf{Architecture simplifiée (\texttt{architecture.py})} :
+    suppression d'une initialisation de poids Kaiming appliquée sans
+    distinction à toutes les couches (y compris la couche de sortie, où
+    l'hypothèse d'activation LeakyReLU ne s'applique pas, voir
+    section~\ref{sec:artifice-init}), et suppression d'un
+    \texttt{Dropout(0.05)} dont le taux, incohérent avec le reste du
+    réseau, avait un effet de régularisation négligeable (voir
+    section~\ref{sec:artifice-dropout}).
+    \item \textbf{Critère de sauvegarde simplifié (\texttt{train.py})} :
+    remplacement d'une condition combinant deux seuils arbitraires (sur
+    l'accuracy \emph{et} sur la perte, avec une valeur absolue tolérant
+    une dégradation de la perte) par un critère unique et explicite --
+    sauvegarder dès que l'accuracy de validation s'améliore, la métrique
+    directement liée à la notation du projet (voir
+    section~\ref{sec:artifice-save}).
+\end{itemize}
+
+Le modèle \texttt{pacman\_model.pth} déposé a été ré-entraîné avec ce
+code corrigé et atteint 0.8901 d'accuracy publique sur le leaderboard
+Gradescope.
+
+\subsection{Limites connues et pistes non retenues}
+
+\begin{itemize}
+    \item Le découpage du tenseur d'entrée en trois blocs dans
+    \texttt{PacmanNetwork.forward} (par indices fixes \texttt{:20},
+    \texttt{20:30}, \texttt{30:}) dépend implicitement de l'ordre exact
+    dans lequel \texttt{state\_to\_tensor} construit le vecteur de
+    features -- un couplage fragile mais assumé pour rester dans le
+    scope initial du projet (une solution plus robuste consisterait à
+    exposer les tailles de groupes comme constantes partagées entre les
+    deux fichiers).
+    \item \texttt{get\_closest\_ghost\_features} dans \texttt{data.py}
+    effectue un calcul BFS redondant (une fois par fantôme pour trouver
+    le plus proche via \texttt{min}, puis une seconde fois pour sa
+    distance exacte) -- non corrigé ici car sans impact sur la
+    correction du résultat, seulement sur le temps de calcul.
+    \item Aucune nouvelle feature ni changement de capacité du réseau
+    n'a été ajouté au-delà des corrections ci-dessus : l'objectif de ce
+    travail était de corriger des défauts identifiés (bug fonctionnel,
+    incohérences de code signalées par la correction manuelle), pas de
+    ré-explorer l'espace des architectures ou des hyperparamètres.
+\end{itemize}
 
 \end{document}

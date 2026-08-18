@@ -99,6 +99,9 @@ def state_to_tensor(state: GameState) -> torch.Tensor:
         scared_timer_sum / max(1, len(scared_ghosts)) / 40.0
     )
 
+    scared_positions = [g['pos'] for g in scared_ghosts]
+    normal_positions = [g['pos'] for g in normal_ghosts]
+
     features: List[int] = []
 
     # ---------------- Directionnelles (20) ----------------
@@ -120,8 +123,8 @@ def state_to_tensor(state: GameState) -> torch.Tensor:
             features.append(0.0)
             features.append(proximity_score(next_pos, food, walls))
             features.append(proximity_score(next_pos, capsules, walls))
-            features.append(proximity_score(next_pos, scared_ghosts, walls))
-            features.append(proximity_score(next_pos, normal_ghosts, walls))
+            features.append(proximity_score(next_pos, scared_positions, walls))
+            features.append(proximity_score(next_pos, normal_positions, walls))
 
     # ---------------- Fantômes (10) ----------------
     def get_closest_ghost_features(ghost_list):

@@ -81,7 +81,7 @@ class Pipeline(nn.Module):
             shuffle=False
         )
 
-        best_loss = 2
+        best_loss = float('inf')
         best_acc = 0.0
         patience_counter = 0
         for epoch in range(epochs):
@@ -124,10 +124,9 @@ class Pipeline(nn.Module):
             print(info)
 
             # Sauvegarde & Early Stopping
-            if val_acc - best_acc >= 0.001 \
-                    and abs(val_loss - best_loss) >= 0.0001:
-                best_loss = val_loss
+            if val_acc > best_acc:
                 best_acc = val_acc
+                best_loss = val_loss
                 patience_counter = 0
                 torch.save(self.model.state_dict(), self.model_save_path)
                 print(f"Enrégistrement avec: {best_acc:.2f}% {best_loss:.4f}")

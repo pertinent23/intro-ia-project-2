@@ -18,7 +18,6 @@ class PacmanNetwork(nn.Module):
         self.direction_branch = nn.Sequential(
             nn.Linear(20, 64),
             nn.LeakyReLU(),
-            nn.Dropout(0.05),
             nn.Linear(64, 64),
             nn.LeakyReLU(),
         )
@@ -50,19 +49,6 @@ class PacmanNetwork(nn.Module):
             nn.Dropout(0.1),
             nn.Linear(64, 5),  # 5 actions possibles
         )
-
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            # Optimisé pour LeakyReLU
-            nn.init.kaiming_normal_(
-                m.weight,
-                mode='fan_out',
-                nonlinearity='leaky_relu'
-            )
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
